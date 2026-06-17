@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { cardSlotId } from '../utils/collection';
+import { cardSlotId, seriesId } from '../utils/collection';
 
 const HISTORY_KEY = 'pokemon_scan_history';
 const COLLECTION_KEY = 'pokemon_collection';
@@ -68,6 +68,13 @@ export async function addToCollection(entry) {
 export async function removeFromCollection(id) {
   const existing = await getCollection();
   const updated = existing.filter(item => item.id !== id);
+  await AsyncStorage.setItem(COLLECTION_KEY, JSON.stringify(updated));
+}
+
+// Retire toutes les cartes d'une série (identifiée par seriesId).
+export async function removeSeriesFromCollection(key) {
+  const existing = await getCollection();
+  const updated = existing.filter(item => seriesId(item) !== key);
   await AsyncStorage.setItem(COLLECTION_KEY, JSON.stringify(updated));
 }
 

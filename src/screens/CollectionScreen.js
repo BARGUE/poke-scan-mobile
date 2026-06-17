@@ -6,7 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { getCollection, removeFromCollection } from '../services/storage';
+import { getCollection, removeFromCollection, removeSeriesFromCollection } from '../services/storage';
 import { parseCardNumber, parseSetTotal, seriesId, pickSetName } from '../utils/collection';
 import { FONTS, RADIUS, SHADOWS } from '../theme';
 import { useTheme } from '../ThemeContext';
@@ -154,6 +154,23 @@ export default function CollectionScreen() {
     );
   };
 
+  // Supprime une série entière de la collection.
+  const handleDeleteSeries = (series) => {
+    Alert.alert(
+      'Supprimer la série',
+      `Supprimer « ${series.title} » et ses ${series.discovered} carte(s) de votre collection ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer', style: 'destructive', onPress: async () => {
+            await removeSeriesFromCollection(series.key);
+            await load();
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -170,6 +187,8 @@ export default function CollectionScreen() {
               <TouchableOpacity
                 style={styles.sectionHeader}
                 onPress={() => toggleSeries(series.key)}
+                onLongPress={() => handleDeleteSeries(series)}
+                delayLongPress={400}
                 activeOpacity={0.7}
               >
                 <Ionicons
@@ -179,6 +198,13 @@ export default function CollectionScreen() {
                 />
                 <Text style={styles.sectionTitle} numberOfLines={1}>{series.title}</Text>
                 <Text style={styles.sectionCount}>{series.discovered}/{series.total}</Text>
+                <TouchableOpacity
+                  style={styles.sectionDelete}
+                  onPress={() => handleDeleteSeries(series)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="trash-outline" size={18} color={colors.textTertiary} />
+                </TouchableOpacity>
               </TouchableOpacity>
               {isOpen && (
                 <View style={styles.grid}>
@@ -240,6 +266,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.surface, borderRadius: RADIUS.md, paddingVertical: 12, paddingHorizontal: 12, marginTop: 8, ...SHADOWS.sm },
   sectionTitle: { flex: 1, fontSize: FONTS.size.md, fontWeight: '500', color: COLORS.textPrimary },
   sectionCount: { fontSize: FONTS.size.xs, fontWeight: '500', color: COLORS.textTertiary },
+  sectionDelete: { padding: 2 },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP, paddingTop: 10 },
   slot: { width: SLOT_W, height: SLOT_H, borderRadius: 6, overflow: 'hidden' },
