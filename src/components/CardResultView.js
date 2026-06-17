@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FONTS, RADIUS, SHADOWS, RARITY_COLORS } from '../theme';
 import { useTheme } from '../ThemeContext';
+import { translateCondition, translateType, formatDateFr } from '../utils/translations';
 
 // Construit l'URL de recherche de la carte sur le site marchand.
 // On ne connaît pas l'ID produit exact, donc on ouvre une recherche
@@ -184,7 +185,7 @@ export default function CardResultView({
           </TouchableOpacity>
         )}
         {!prices?.estimated && prices?.lastUpdated ? (
-          <Text style={styles.updatedAt}>Cotes mises à jour le {prices.lastUpdated}</Text>
+          <Text style={styles.updatedAt}>Cotes mises à jour le {formatDateFr(prices.lastUpdated)}</Text>
         ) : null}
       </View>
 
@@ -193,10 +194,10 @@ export default function CardResultView({
         {[
           ['Set', card.set],
           ['Numéro', card.number],
-          ['Type', card.type],
+          ['Type', translateType(card.type) || '—'],
           ['HP', card.hp || '—'],
           ['Année', card.year || '—'],
-          ['État estimé', card.condition || '—'],
+          ['État estimé', translateCondition(card.condition) || '—'],
         ].map(([k, v]) => (
           <View key={k} style={styles.detailRow}>
             <Text style={styles.detailKey}>{k}</Text>
