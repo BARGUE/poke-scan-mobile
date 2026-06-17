@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "Pokémon Scanner",
+    "slug": "pokemon-scanner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "backgroundColor": "#E24B4A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourname.pokemonscanner",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Nous utilisons la caméra pour scanner vos cartes Pokémon.",
+        "NSPhotoLibraryUsageDescription": "Nous accédons à vos photos pour analyser vos cartes Pokémon.",
+        "NSPhotoLibraryAddUsageDescription": "Nous sauvegardons les photos de vos cartes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#E24B4A"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.yourname.pokemonscanner"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Autoriser Pokémon Scanner à utiliser la caméra pour scanner vos cartes."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Autoriser Pokémon Scanner à accéder à vos photos."
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "0ebb3e2b-fd6a-4b40-9ad1-08bb6fe1dc82"
+      }
+    }
+  }
+}
