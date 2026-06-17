@@ -1,0 +1,11 @@
+name = "pokemon-scanner-proxy"
+main = "src/index.js"
+compatibility_date = "2024-09-01"
+
+# Les clés API ne sont PAS écrites ici (ce fichier est versionné).
+# On les fournit comme "secrets" chiffrés, en ligne de commande :
+#
+#   npx wrangler secret put ANTHROPIC_API_KEY
+#   npx wrangler secret put POKEMONTCG_API_KEY
+#
+# Voir proxy/README.md pour les étapes complètes de déploiement.

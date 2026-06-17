@@ -2,8 +2,11 @@
 // Contrairement à l'ancienne approche (chiffres demandés au LLM), les prix
 // proviennent ici directement de TCGplayer (USD) et Cardmarket (EUR), avec une
 // vraie URL vers la fiche de la carte. C'est vérifiable et reproductible.
-const POKEMONTCG_API = 'https://api.pokemontcg.io/v2/cards';
-const API_KEY = process.env.EXPO_PUBLIC_POKEMONTCG_API_KEY;
+//
+// On ne tape plus l'API directement : on passe par notre proxy Cloudflare
+// Worker (voir proxy/), qui ajoute la clé Pokémon TCG côté serveur. Aucune clé
+// API n'est donc présente dans le bundle de l'app.
+const PROXY_URL = process.env.EXPO_PUBLIC_PROXY_URL;
 
 // Taux de repli, utilisé uniquement pour comparer deux devises (bestDeal) et
 // pour le fallback. L'affichage reconvertit ensuite via le ThemeContext.
@@ -24,10 +27,9 @@ function escapeQuery(str) {
 }
 
 async function queryCards(q) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (API_KEY) headers['X-Api-Key'] = API_KEY;
-  const url = `${POKEMONTCG_API}?q=${encodeURIComponent(q)}&pageSize=20`;
-  const res = await fetch(url, { headers });
+  if (!PROXY_URL) throw new Error('URL du proxy manquante (EXPO_PUBLIC_PROXY_URL).');
+  const url = `${PROXY_URL}/prices?q=${encodeURIComponent(q)}&pageSize=20`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`API Pokémon TCG : HTTP ${res.status}`);
   const json = await res.json();
   return json.data || [];

@@ -30,17 +30,22 @@ cd pokemon-scanner
 npm install
 ```
 
-### Étape 3 — Configurer votre clé API
+### Étape 3 — Déployer le proxy (qui détient les clés secrètes)
 
-1. Créez un compte sur [console.anthropic.com](https://console.anthropic.com)
-2. Générez une clé API dans Settings > API Keys
-3. Copiez `.env.example` en `.env` :
+> 🔒 **Important** : les clés API ne sont **jamais** placées dans l'app. Une
+> clé embarquée dans un bundle mobile est toujours extractible. Elles vivent
+> côté serveur, dans un petit proxy Cloudflare Worker (gratuit).
+
+1. Suivez les étapes de [`proxy/README.md`](proxy/README.md) pour déployer le
+   Worker et y enregistrer vos clés Anthropic et Pokémon TCG.
+2. Copiez `.env.example` en `.env` :
    ```powershell
    copy .env.example .env
    ```
-4. Ouvrez `.env` et remplacez `sk-ant-votre-cle-ici` par votre vraie clé
-
-> **Alternative** : entrez votre clé directement dans l'app via l'onglet Réglages
+3. Dans `.env`, mettez l'URL de votre Worker (affichée après le déploiement) :
+   ```
+   EXPO_PUBLIC_PROXY_URL=https://pokemon-scanner-proxy.VOTRE-SOUS-DOMAINE.workers.dev
+   ```
 
 ### Étape 4 — Lancer l'app
 
@@ -66,14 +71,19 @@ Un QR code s'affiche dans le terminal.
 pokemon-scanner/
 ├── App.js                    # Navigation principale
 ├── app.json                  # Config Expo
-├── .env.example              # Template variables d'environnement
+├── .env.example              # Template (URL du proxy, aucun secret)
+├── proxy/                    # Cloudflare Worker — détient les clés secrètes
+│   ├── src/index.js          # Proxy /identify (Claude) + /prices (Pokémon TCG)
+│   ├── wrangler.toml         # Config du Worker
+│   └── README.md             # Étapes de déploiement
 ├── src/
 │   ├── screens/
 │   │   ├── ScannerScreen.js  # Caméra + analyse + résultats
 │   │   ├── HistoryScreen.js  # Historique des scans
-│   │   └── SettingsScreen.js # Clé API + infos
+│   │   └── SettingsScreen.js # Réglages + infos
 │   ├── services/
-│   │   ├── anthropic.js      # Appels API Claude (Vision + Web Search)
+│   │   ├── anthropic.js      # Appel du proxy -> Claude Vision
+│   │   ├── prices.js         # Appel du proxy -> Pokémon TCG
 │   │   └── storage.js        # Sauvegarde locale historique
 │   └── theme.js              # Couleurs, typographie, espacements
 ```
@@ -87,11 +97,13 @@ iPhone Camera
      ↓
 Image (base64)
      ↓
+Proxy Cloudflare Worker  (détient les clés secrètes)
+     ↓
 Claude Vision (claude-sonnet-4-6)
 → Identifie : nom, set, numéro, rareté, HP, condition
      ↓
-Claude + Web Search
-→ Cherche les prix sur TCGPlayer, Cardmarket, eBay
+Proxy → API Pokémon TCG
+→ Prix réels TCGplayer (USD) / Cardmarket (EUR) + URL de la fiche
      ↓
 Affichage des prix + meilleure offre
      ↓
@@ -100,18 +112,19 @@ Sauvegarde dans l'historique local
 
 ---
 
-## Clé API
+## Clés API
 
-- Obtenez votre clé sur [console.anthropic.com](https://console.anthropic.com/settings/keys)
-- Coût approximatif : ~0.01–0.03 € par scan
-- Les nouveaux comptes Anthropic reçoivent des crédits gratuits
+- Les clés vivent **uniquement** dans le proxy (Cloudflare Worker), jamais dans l'app.
+- Anthropic : [console.anthropic.com](https://console.anthropic.com/settings/keys) — ~0.01–0.03 € par scan, crédits gratuits offerts aux nouveaux comptes.
+- Pokémon TCG : [dev.pokemontcg.io](https://dev.pokemontcg.io/) — gratuite, évite le rate limiting.
+- Déploiement et enregistrement des clés : voir [`proxy/README.md`](proxy/README.md).
 
 ---
 
 ## Dépannage
 
 **"Network request failed"**
-→ Vérifiez que votre clé API est correcte dans `.env` ou dans Réglages
+→ Vérifiez que `EXPO_PUBLIC_PROXY_URL` est correct dans `.env` et que le proxy est bien déployé (`npm run deploy` dans `proxy/`)
 
 **L'app ne s'ouvre pas dans Expo Go**
 → Vérifiez que le PC et l'iPhone sont sur le même Wi-Fi
