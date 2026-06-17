@@ -18,6 +18,50 @@ function cardNumberToken(number) {
   return first;
 }
 
+// "025/165" -> { num: "25", total: 165 }. Le total (dénominateur) est un
+// indice FORT et indépendant de la langue pour identifier le bon set.
+function parseNumber(number) {
+  const [numPart, totalPart] = String(number || '').split('/');
+  const total = totalPart && /^\d+$/.test(totalPart.trim())
+    ? parseInt(totalPart.trim(), 10)
+    : null;
+  return { num: cardNumberToken(numPart), total };
+}
+
+// Normalise pour comparer des libellés : minuscules, sans accents ni ponctuation.
+function normalize(str) {
+  return String(str || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // retire les accents
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+// Score de correspondance entre le set identifié par l'IA et un résultat de
+// l'API. On privilégie les signaux indépendants de la langue (total imprimé,
+// code du set, année) car l'IA renvoie le set en français et l'API en anglais.
+const STRONG_SET_SCORE = 5; // au moins un signal fort (total OU code de set)
+
+function scoreSet(card, parsed, r) {
+  let score = 0;
+  const set = r.set || {};
+
+  const rTotal = set.printedTotal ?? set.total ?? null;
+  if (parsed.total && rTotal && parsed.total === rTotal) score += 5;
+
+  if (card.setCode && set.id && normalize(card.setCode) === normalize(set.id)) score += 6;
+
+  const rYear = String(set.releaseDate || '').slice(0, 4);
+  if (card.year && rYear && String(card.year).slice(0, 4) === rYear) score += 2;
+
+  if (card.set && set.name) {
+    const a = normalize(card.set);
+    const b = normalize(set.name);
+    if (a && b && (a === b || a.includes(b) || b.includes(a))) score += 2;
+  }
+  return score;
+}
+
 // Échappe les guillemets pour la syntaxe de requête Lucene de l'API.
 function escapeQuery(str) {
   return String(str || '').replace(/["\\]/g, '\\$&');
@@ -35,9 +79,16 @@ async function queryCards(q) {
 // Cherche la carte la plus proche de ce que l'IA a identifié.
 // On tente d'abord la requête la plus précise (nom + numéro), puis on
 // relâche les contraintes si rien ne correspond.
+//
+// Renvoie { match, confident } : `confident` vaut true seulement si le SET a
+// été confirmé par un signal fort (total imprimé ou code de set identiques).
+// Sans cette confirmation, plusieurs éditions de la même carte (même nom +
+// numéro) sont indiscernables et l'URL directe pourrait pointer vers la
+// mauvaise collection — on la masquera alors en amont.
 async function findCard(card) {
   const name = card.nameEn || card.name;
-  const num = cardNumberToken(card.number);
+  const parsed = parseNumber(card.number);
+  const num = parsed.num;
   const attempts = [];
   if (name && num) attempts.push(`name:"${escapeQuery(name)}" number:"${escapeQuery(num)}"`);
   if (name) attempts.push(`name:"${escapeQuery(name)}"`);
@@ -51,18 +102,21 @@ async function findCard(card) {
     }
     if (!results.length) continue;
 
-    // Priorité : même numéro ET données de prix présentes > même numéro >
-    // données de prix présentes > premier résultat.
+    // On restreint au bon numéro si on le connaît, puis on classe par score de
+    // correspondance du set ; à score égal, on départage par présence de cotes.
     const sameNumber = r => num && cardNumberToken(r.number) === num;
-    const hasPrices = r => r.tcgplayer?.prices || r.cardmarket?.prices;
-    return (
-      results.find(r => sameNumber(r) && hasPrices(r)) ||
-      results.find(r => sameNumber(r)) ||
-      results.find(hasPrices) ||
-      results[0]
-    );
+    const hasPrices = r => (r.tcgplayer?.prices || r.cardmarket?.prices) ? 1 : 0;
+    const pool = num ? results.filter(sameNumber) : results;
+    if (!pool.length) continue;
+
+    const scored = pool
+      .map(r => ({ r, score: scoreSet(card, parsed, r) }))
+      .sort((a, b) => (b.score - a.score) || (hasPrices(b.r) - hasPrices(a.r)));
+
+    const best = scored[0];
+    return { match: best.r, confident: best.score >= STRONG_SET_SCORE };
   }
-  return null;
+  return { match: null, confident: false };
 }
 
 function trendFrom(recent, base) {
@@ -136,11 +190,15 @@ function fromTcgplayer(tp, rarity) {
 async function fetchFromPokemonTcg(card, currency) {
   const isUsd = currency === 'USD';
   try {
-    const match = await findCard(card);
+    const { match, confident } = await findCard(card);
     const source = isUsd
       ? fromTcgplayer(match?.tcgplayer, card.rarity)
       : fromCardmarket(match?.cardmarket);
     if (!source) return null;
+    // Set non confirmé : l'URL directe risque de mener à une autre édition de la
+    // carte (image différente). On l'efface pour que CardResultView retombe sur
+    // une recherche pré-remplie nom + numéro, qui reste cohérente.
+    if (!confident) source.url = null;
     return { id: isUsd ? 'tcgplayer' : 'cardmarket', source };
   } catch {
     return null;
