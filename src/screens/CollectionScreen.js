@@ -7,40 +7,28 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getCollection, removeFromCollection } from '../services/storage';
+import { parseCardNumber, parseSetTotal, seriesId, pickSetName } from '../utils/collection';
 import { FONTS, RADIUS, SHADOWS } from '../theme';
 import { useTheme } from '../ThemeContext';
 import CardResultView from '../components/CardResultView';
 
-// Extrait le numéro de la carte ("25/198" -> 25, "TG05" -> 5).
-function parseCardNumber(number) {
-  if (!number) return null;
-  const m = String(number).match(/\d+/);
-  return m ? parseInt(m[0], 10) : null;
-}
-
-// Extrait la taille de la série à partir du "/Y" ("25/198" -> 198).
-function parseSetTotal(number) {
-  if (!number) return null;
-  const m = String(number).match(/\/\s*(\d+)/);
-  return m ? parseInt(m[1], 10) : null;
-}
-
-// Regroupe la collection par série + année. Pour chaque série on construit une
-// grille d'emplacements : si on connaît la taille de la série (format "X/Y"),
-// on génère un emplacement par numéro (1..Y) que la carte scannée vient remplir ;
-// sinon on n'affiche que les cartes découvertes.
+// Regroupe la collection par série (identité année + taille, indépendante du
+// libellé exact renvoyé par l'IA). Pour chaque série on construit une grille
+// d'emplacements : si on connaît la taille de la série (format "X/Y"), on génère
+// un emplacement par numéro (1..Y) que la carte scannée vient remplir ; sinon on
+// n'affiche que les cartes découvertes.
 function buildCollection(cards) {
   const groups = {};
   for (const item of cards) {
-    const set = item.set || 'Série inconnue';
-    const year = item.year || '';
-    const key = `${set}__${year}`;
-    if (!groups[key]) groups[key] = { key, set, year, items: [] };
+    const key = seriesId(item);
+    if (!groups[key]) groups[key] = { key, items: [] };
     groups[key].items.push(item);
   }
 
   return Object.values(groups)
     .map(g => {
+      const set = pickSetName(g.items);
+      const year = g.items.find(it => it.year)?.year || '';
       // Carte la plus récente pour chaque numéro (la collection est anté-chronologique).
       const byNumber = new Map();
       let maxTotal = 0;
@@ -66,10 +54,10 @@ function buildCollection(cards) {
 
       return {
         key: g.key,
-        title: g.year ? `${g.set} · ${g.year}` : g.set,
+        title: year ? `${set} · ${year}` : set,
         total: maxTotal || g.items.length,
         discovered: byNumber.size || g.items.length,
-        year: g.year,
+        year,
         slots,
       };
     })

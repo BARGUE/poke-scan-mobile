@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { cardSlotId } from '../utils/collection';
 
 const HISTORY_KEY = 'pokemon_scan_history';
 const COLLECTION_KEY = 'pokemon_collection';
@@ -38,14 +39,10 @@ export async function saveToHistory(card, prices, imageUri) {
 }
 
 // --- Collection (album permanent) ---------------------------------------
-// Identité d'un emplacement : série + année + numéro. Re-scanner la même
-// carte met à jour l'emplacement au lieu d'en créer un doublon.
-function collectionKey(entry) {
-  const set = entry.set || 'Série inconnue';
-  const year = entry.year || '';
-  const num = (entry.number || entry.name || entry.id || '').toString().trim();
-  return `${set}__${year}__${num}`;
-}
+// L'identité d'un emplacement (année + taille de série + numéro) est calculée
+// par cardSlotId : elle ignore le libellé exact du set, que l'IA renvoie de
+// façon inconsistante. Re-scanner la même carte met à jour l'emplacement au
+// lieu de créer un doublon, même si l'IA nomme le set différemment.
 
 export async function getCollection() {
   try {
@@ -59,8 +56,8 @@ export async function getCollection() {
 export async function addToCollection(entry) {
   try {
     const existing = await getCollection();
-    const key = collectionKey(entry);
-    const filtered = existing.filter(e => collectionKey(e) !== key);
+    const key = cardSlotId(entry);
+    const filtered = existing.filter(e => cardSlotId(e) !== key);
     const updated = [entry, ...filtered];
     await AsyncStorage.setItem(COLLECTION_KEY, JSON.stringify(updated));
   } catch (e) {
