@@ -1,19 +1,12 @@
-// Récupération des prix de cartes Pokémon, agrégés depuis plusieurs sources.
+// Récupération des prix de cartes Pokémon (via notre proxy Cloudflare Worker,
+// voir proxy/) depuis pokemontcg.io : TCGplayer (USD) ou Cardmarket (EUR).
 //
-// On interroge en parallèle (via notre proxy Cloudflare Worker, voir proxy/) :
-//   - pokemontcg.io  : TCGplayer (USD) ou Cardmarket (EUR)
-//   - JustTCG        : cotes TCGplayer (USD uniquement → converties si réglage EUR)
-//   - PokemonPriceTracker : TCGplayer (USD) ou CardMarket (EUR)
-//
-// Le réglage de devise du user choisit le marché : EUR -> cotes européennes,
-// USD -> cotes américaines. Toutes les sources sont alors ramenées à cette même
-// devise (JustTCG est converti depuis l'USD), ce qui rend la comparaison
-// « meilleur prix » homogène. Aucune clé API n'est présente dans le bundle :
-// elles sont ajoutées côté serveur par le proxy.
+// Le réglage de devise du user choisit le marché : EUR -> cote Cardmarket
+// (européenne), USD -> cote TCGplayer (américaine). Aucune clé API n'est
+// présente dans le bundle : elle est ajoutée côté serveur par le proxy.
 const PROXY_URL = process.env.EXPO_PUBLIC_PROXY_URL;
 
-// Taux de repli, utilisé pour convertir les cotes USD-only (JustTCG) vers l'EUR
-// et pour le fallback. L'affichage reconvertit ensuite via le ThemeContext.
+// Taux de repli, utilisé pour le fallback par rareté.
 const USD_PER_EUR = 1.08;
 
 // "025/165" -> "25" ; "TG05/TG30" -> "TG05" ; "H1" -> "H1".
@@ -79,27 +72,8 @@ function trendFrom(recent, base) {
   return 'stable';
 }
 
-// Tendance à partir d'une variation en pourcentage (JustTCG : priceChange24hr).
-function trendFromChange(change) {
-  if (typeof change !== 'number') return 'stable';
-  if (change > 1) return 'up';
-  if (change < -1) return 'down';
-  return 'stable';
-}
-
 function round(v) {
   return typeof v === 'number' ? +v.toFixed(2) : v;
-}
-
-function num(v) {
-  const n = typeof v === 'string' ? parseFloat(v) : v;
-  return typeof n === 'number' && isFinite(n) ? n : null;
-}
-
-// Convertit un montant USD vers la devise d'affichage demandée.
-function toCurrency(usd, currency) {
-  if (usd == null) return null;
-  return currency === 'EUR' ? usd / USD_PER_EUR : usd;
 }
 
 // Construit { mid, low, high, trend, currency, url, market } à partir du bloc Cardmarket (EUR).
@@ -155,12 +129,10 @@ function fromTcgplayer(tp, rarity) {
   };
 }
 
-// --- Sources individuelles -----------------------------------------------
-// Chacune renvoie { id, source } ou null. Toute erreur (proxy non configuré,
-// HTTP non-ok, champ manquant) est avalée : la source est simplement omise,
-// sans déclencher le fallback global tant qu'au moins une source répond.
-
-// pokemontcg.io (source historique).
+// --- Source -----------------------------------------------------------------
+// pokemontcg.io : renvoie { id, source } ou null. Toute erreur (proxy non
+// configuré, HTTP non-ok, champ manquant) est avalée : on retombe alors sur
+// l'estimation par rareté.
 async function fetchFromPokemonTcg(card, currency) {
   const isUsd = currency === 'USD';
   try {
@@ -175,154 +147,15 @@ async function fetchFromPokemonTcg(card, currency) {
   }
 }
 
-// JustTCG — cotes TCGplayer (USD). En réglage EUR on convertit l'USD en euros
-// (marqué `approx`), JustTCG ne fournissant pas de cote européenne native.
-async function fetchFromJustTcg(card, currency) {
-  if (!PROXY_URL) return null;
-  const name = card.nameEn || card.name;
-  if (!name) return null;
-  try {
-    const url = `${PROXY_URL}/justtcg?q=${encodeURIComponent(name)}&game=pokemon&condition=NM`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const json = await res.json();
-    const cards = json.data || json.cards || [];
-    if (!Array.isArray(cards) || !cards.length) return null;
-
-    // On tente de retrouver la bonne carte par numéro, sinon on prend la première.
-    const wantNum = cardNumberToken(card.number);
-    const matched = cards.find(c => {
-      const n = c.number ?? c.cardNumber ?? c.collectorNumber;
-      return wantNum && n != null && cardNumberToken(n) === wantNum;
-    }) || cards[0];
-
-    const variants = matched.variants || matched.prices || [];
-    const variant = pickJustTcgVariant(variants, card.rarity) || matched;
-    const priceUsd = num(variant.price ?? variant.marketPrice ?? variant.market);
-    if (priceUsd == null) return null;
-
-    const lowUsd = num(variant.minPrice ?? variant.lowPrice ?? variant.low) ?? priceUsd;
-    const highUsd = num(variant.maxPrice ?? variant.highPrice ?? variant.high) ?? priceUsd;
-    const change = num(variant.priceChange24hr ?? variant.priceChange7d);
-
-    const source = {
-      mid: round(toCurrency(priceUsd, currency)),
-      low: round(toCurrency(Math.min(lowUsd, priceUsd), currency)),
-      high: round(toCurrency(Math.max(highUsd, priceUsd), currency)),
-      trend: trendFromChange(change),
-      currency,
-      market: 'tcgplayer',
-      url: matched.url || variant.url || null,
-      approx: currency === 'EUR', // converti depuis l'USD
-      updatedAt: variant.lastUpdated || matched.lastUpdated || '',
-    };
-    return { id: 'justtcg', source };
-  } catch {
-    return null;
-  }
-}
-
-// Choisit la variante JustTCG Near Mint / finition pertinente selon la rareté.
-function pickJustTcgVariant(variants, rarity) {
-  if (!Array.isArray(variants) || !variants.length) return null;
-  const nm = variants.filter(v => /near mint|^nm$/i.test(v.condition || '') || !v.condition);
-  const pool = nm.length ? nm : variants;
-  const holoish = /holo|rare|ultra|secret|illustration|gx|ex|v|vmax/i.test(rarity || '');
-  if (holoish) {
-    const foil = pool.find(v => /foil|holo/i.test(v.printing || ''));
-    if (foil) return foil;
-  }
-  return pool[0];
-}
-
-// Extrait { mid, low, high, change } d'un bloc de prix aux noms de champs variés.
-function extractPriceBlock(obj) {
-  if (!obj || typeof obj !== 'object') return null;
-  const mid = num(obj.market ?? obj.marketPrice ?? obj.mid ?? obj.trendPrice ?? obj.price ?? obj.averageSellPrice);
-  if (mid == null) return null;
-  const low = num(obj.low ?? obj.lowPrice ?? obj.min) ?? mid;
-  const high = num(obj.high ?? obj.highPrice ?? obj.max) ?? mid;
-  return { mid, low, high, change: num(obj.priceChange ?? obj.change) };
-}
-
-// PokemonPriceTracker (API v2, endpoint /cards?search=). Le bloc principal
-// `prices` est en USD (TCGplayer) ; CardMarket (EUR) n'est dispo que sur les
-// offres payantes. En réglage EUR on prend la cote CardMarket si présente,
-// sinon on convertit l'USD en euros (marqué `approx`), comme pour JustTCG.
-async function fetchFromPokemonPriceTracker(card, currency) {
-  if (!PROXY_URL) return null;
-  const name = card.nameEn || card.name;
-  if (!name) return null;
-  const isUsd = currency === 'USD';
-  try {
-    const res = await fetch(`${PROXY_URL}/pokemonpricetracker?search=${encodeURIComponent(name)}`);
-    if (!res.ok) return null;
-    const json = await res.json();
-    const cards = json.data?.cards || json.cards || json.data || [];
-    if (!Array.isArray(cards) || !cards.length) return null;
-
-    const wantNum = cardNumberToken(card.number);
-    const matched = cards.find(c => {
-      const n = c.number ?? c.cardNumber ?? c.collectorNumber;
-      return wantNum && n != null && cardNumberToken(n) === wantNum;
-    }) || cards[0];
-
-    const root = matched.prices || matched.pricing || matched;
-    // USD : bloc tcgplayer dédié, sinon prix « à plat » sur l'objet prices.
-    const usd = extractPriceBlock(root.tcgplayer || root.tcgPlayer || root.tcg || root);
-    const eur = extractPriceBlock(root.cardmarket || root.cardMarket || root.cm);
-
-    let block, market, approx = false;
-    if (isUsd) {
-      block = usd; market = 'tcgplayer';
-    } else if (eur) {
-      block = eur; market = 'cardmarket';
-    } else if (usd) {
-      block = { mid: usd.mid / USD_PER_EUR, low: usd.low / USD_PER_EUR, high: usd.high / USD_PER_EUR, change: usd.change };
-      market = 'tcgplayer';
-      approx = true;
-    }
-    if (!block) return null;
-
-    const source = {
-      mid: round(block.mid),
-      low: round(Math.min(block.low, block.mid)),
-      high: round(Math.max(block.high, block.mid)),
-      trend: trendFromChange(block.change),
-      currency,
-      market,
-      url: matched.url || matched.tcgplayerUrl || null,
-      approx,
-      updatedAt: matched.updatedAt || matched.lastUpdated || '',
-    };
-    return { id: 'pokemonpricetracker', source };
-  } catch {
-    return null;
-  }
-}
-
 // --- Agrégation -----------------------------------------------------------
 
 export async function fetchCardPrices(card, currency = 'EUR') {
-  const results = await Promise.allSettled([
-    fetchFromPokemonTcg(card, currency),
-    fetchFromJustTcg(card, currency),
-    fetchFromPokemonPriceTracker(card, currency),
-  ]);
+  const result = await fetchFromPokemonTcg(card, currency);
+  if (!result) return generateFallbackPrices(card.rarity, currency);
 
-  const prices = {};
-  for (const r of results) {
-    if (r.status === 'fulfilled' && r.value) prices[r.value.id] = r.value.source;
-  }
-
-  const keys = Object.keys(prices);
-  if (!keys.length) return generateFallbackPrices(card.rarity, currency);
-
-  // Toutes les sources sont dans la devise du réglage : le « meilleur prix »
-  // est simplement la cote médiane la plus basse.
-  const bestDeal = keys.reduce((best, k) => (prices[k].mid < prices[best].mid ? k : best), keys[0]);
-  prices.bestDeal = bestDeal;
-  prices.lastUpdated = prices[bestDeal].updatedAt || '';
+  const prices = { [result.id]: result.source };
+  prices.bestDeal = result.id;
+  prices.lastUpdated = result.source.updatedAt || '';
   return prices;
 }
 

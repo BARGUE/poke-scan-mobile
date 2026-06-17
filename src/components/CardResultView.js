@@ -96,15 +96,12 @@ export default function CardResultView({
     );
   };
 
-  // Les sources affichées dépendent de ce que chaque API a renvoyé. Plusieurs
-  // fournisseurs peuvent coexister (pokemontcg.io, JustTCG, PokemonPriceTracker) ;
-  // tous sont ramenés à la devise du réglage pour pouvoir être comparés.
-  const SOURCE_ORDER = ['tcgplayer', 'cardmarket', 'justtcg', 'pokemonpricetracker', 'ebay'];
+  // La source affichée dépend de la devise du réglage : TCGplayer (USD) ou
+  // Cardmarket (EUR), via pokemontcg.io.
+  const SOURCE_ORDER = ['tcgplayer', 'cardmarket', 'ebay'];
   const sourceMeta = {
     tcgplayer: { label: 'TCGplayer', color: colors.tcgplayer },
     cardmarket: { label: 'Cardmarket', color: colors.cardmarket },
-    justtcg: { label: 'JustTCG', color: colors.justtcg },
-    pokemonpricetracker: { label: 'Pokémon Price Tracker', color: colors.pokemonpricetracker },
     ebay: { label: 'eBay', color: colors.ebay },
   };
   const marketSub = { tcgplayer: 'Marché US', cardmarket: 'Marché EU' };

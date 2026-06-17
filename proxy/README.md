@@ -1,8 +1,8 @@
 # Proxy Pokémon Scanner (Cloudflare Worker)
 
-Ce petit serveur détient les clés API **secrètes** (Anthropic, Pokémon TCG,
-JustTCG, Pokémon Price Tracker). L'app mobile n'appelle que ce Worker : les clés
-ne quittent jamais le serveur, donc on ne peut plus les extraire du bundle.
+Ce petit serveur détient les clés API **secrètes** (Anthropic, Pokémon TCG).
+L'app mobile n'appelle que ce Worker : les clés ne quittent jamais le serveur,
+donc on ne peut plus les extraire du bundle.
 
 ```
 App  ──(image / requête)──►  Worker (clés secrètes)  ──►  api.anthropic.com
@@ -41,12 +41,6 @@ npx wrangler secret put ANTHROPIC_API_KEY
 
 npx wrangler secret put POKEMONTCG_API_KEY
 # colle ta clé Pokémon TCG puis Entrée
-
-npx wrangler secret put JUSTTCG_API_KEY
-# colle ta clé JustTCG (tcg_...) puis Entrée
-
-npx wrangler secret put POKEMONPRICETRACKER_API_KEY
-# colle ta clé Pokémon Price Tracker puis Entrée
 ```
 
 ### 4. Déployer
@@ -79,8 +73,6 @@ clé secrète ne se trouve plus dans l'app.
 # Pour tester en local, crée un fichier proxy/.dev.vars (déjà gitignoré) :
 #   ANTHROPIC_API_KEY=sk-ant-...
 #   POKEMONTCG_API_KEY=...
-#   JUSTTCG_API_KEY=tcg_...
-#   POKEMONPRICETRACKER_API_KEY=...
 npm run dev
 ```
 
@@ -90,5 +82,3 @@ npm run dev
 |---------|-------------------------|-------------------------------------|------------------------|
 | `POST`  | `/identify`             | `{ "image": "<base64>" }`           | Claude Vision          |
 | `GET`   | `/prices`               | `?q=<requête lucene>&pageSize=20`   | Pokémon TCG API        |
-| `GET`   | `/justtcg`              | `?q=<nom>&game=pokemon&condition=NM`| JustTCG API            |
-| `GET`   | `/pokemonpricetracker`  | `?name=<nom>&number=<num>`          | PokemonPriceTracker API|
