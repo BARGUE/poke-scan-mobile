@@ -226,7 +226,3 @@ Le modèle, le prompt et `max_tokens` sont **fixés côté Worker** pour cantonn
 | **Carte non reconnue** | Bon éclairage, carte centrée dans le cadre. Essayez l'import depuis la galerie. |
 
 ---
-
-<div align="center">
-<sub>Fait avec ❤️ et Claude — les clés API restent au chaud côté serveur.</sub>
-</div>
