@@ -235,49 +235,65 @@ function pickJustTcgVariant(variants, rarity) {
   return pool[0];
 }
 
-// PokemonPriceTracker — expose TCGplayer (USD) et CardMarket (EUR).
-// On lit le bloc correspondant au réglage devise.
+// Extrait { mid, low, high, change } d'un bloc de prix aux noms de champs variés.
+function extractPriceBlock(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const mid = num(obj.market ?? obj.marketPrice ?? obj.mid ?? obj.trendPrice ?? obj.price ?? obj.averageSellPrice);
+  if (mid == null) return null;
+  const low = num(obj.low ?? obj.lowPrice ?? obj.min) ?? mid;
+  const high = num(obj.high ?? obj.highPrice ?? obj.max) ?? mid;
+  return { mid, low, high, change: num(obj.priceChange ?? obj.change) };
+}
+
+// PokemonPriceTracker (API v2, endpoint /cards?search=). Le bloc principal
+// `prices` est en USD (TCGplayer) ; CardMarket (EUR) n'est dispo que sur les
+// offres payantes. En réglage EUR on prend la cote CardMarket si présente,
+// sinon on convertit l'USD en euros (marqué `approx`), comme pour JustTCG.
 async function fetchFromPokemonPriceTracker(card, currency) {
   if (!PROXY_URL) return null;
   const name = card.nameEn || card.name;
   if (!name) return null;
   const isUsd = currency === 'USD';
   try {
-    const wantNum = cardNumberToken(card.number);
-    const params = new URLSearchParams({ name });
-    if (wantNum) params.set('number', wantNum);
-    const res = await fetch(`${PROXY_URL}/pokemonpricetracker?${params}`);
+    const res = await fetch(`${PROXY_URL}/pokemonpricetracker?search=${encodeURIComponent(name)}`);
     if (!res.ok) return null;
     const json = await res.json();
     const cards = json.data?.cards || json.cards || json.data || [];
     if (!Array.isArray(cards) || !cards.length) return null;
 
+    const wantNum = cardNumberToken(card.number);
     const matched = cards.find(c => {
       const n = c.number ?? c.cardNumber ?? c.collectorNumber;
       return wantNum && n != null && cardNumberToken(n) === wantNum;
     }) || cards[0];
 
-    // Les prix peuvent être nichés sous .prices, .pricing ou à la racine.
     const root = matched.prices || matched.pricing || matched;
-    const block = isUsd
-      ? (root.tcgplayer || root.tcgPlayer || root.tcg)
-      : (root.cardmarket || root.cardMarket || root.cm);
+    // USD : bloc tcgplayer dédié, sinon prix « à plat » sur l'objet prices.
+    const usd = extractPriceBlock(root.tcgplayer || root.tcgPlayer || root.tcg || root);
+    const eur = extractPriceBlock(root.cardmarket || root.cardMarket || root.cm);
+
+    let block, market, approx = false;
+    if (isUsd) {
+      block = usd; market = 'tcgplayer';
+    } else if (eur) {
+      block = eur; market = 'cardmarket';
+    } else if (usd) {
+      block = { mid: usd.mid / USD_PER_EUR, low: usd.low / USD_PER_EUR, high: usd.high / USD_PER_EUR, change: usd.change };
+      market = 'tcgplayer';
+      approx = true;
+    }
     if (!block) return null;
 
-    const mid = num(block.market ?? block.marketPrice ?? block.mid ?? block.trendPrice ?? block.price ?? block.averageSellPrice);
-    if (mid == null) return null;
-    const low = num(block.low ?? block.lowPrice ?? block.min) ?? mid;
-    const high = num(block.high ?? block.highPrice ?? block.max) ?? mid;
-
     const source = {
-      mid: round(mid),
-      low: round(Math.min(low, mid)),
-      high: round(Math.max(high, mid)),
-      trend: trendFromChange(num(block.priceChange ?? block.change)),
-      currency: isUsd ? 'USD' : 'EUR',
-      market: isUsd ? 'tcgplayer' : 'cardmarket',
-      url: matched.url || block.url || null,
-      updatedAt: block.updatedAt || matched.updatedAt || '',
+      mid: round(block.mid),
+      low: round(Math.min(block.low, block.mid)),
+      high: round(Math.max(block.high, block.mid)),
+      trend: trendFromChange(block.change),
+      currency,
+      market,
+      url: matched.url || matched.tcgplayerUrl || null,
+      approx,
+      updatedAt: matched.updatedAt || matched.lastUpdated || '',
     };
     return { id: 'pokemonpricetracker', source };
   } catch {

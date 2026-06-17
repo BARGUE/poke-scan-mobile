@@ -18,7 +18,7 @@
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const POKEMONTCG_API = 'https://api.pokemontcg.io/v2/cards';
 const JUSTTCG_API = 'https://api.justtcg.com/v1/cards';
-const POKEMONPRICETRACKER_API = 'https://www.pokemonpricetracker.com/api/v1/cards';
+const POKEMONPRICETRACKER_API = 'https://www.pokemonpricetracker.com/api/v2/cards';
 
 const IDENTIFY_PROMPT = `Tu es un expert en cartes Pokémon TCG. Analyse cette image de carte Pokémon et retourne UNIQUEMENT un objet JSON valide (pas de markdown, pas d'explication), avec ces champs exactement :
 {
@@ -178,7 +178,9 @@ async function handlePokemonPriceTracker(url, env) {
     return json({ error: 'Proxy mal configuré : POKEMONPRICETRACKER_API_KEY manquante.' }, 500);
   }
   const params = new URLSearchParams();
-  for (const key of ['name', 'set', 'number', 'limit', 'id']) {
+  // L'API v2 cherche via le paramètre `search`. On relaie aussi quelques
+  // filtres optionnels selon ce que l'app fournit.
+  for (const key of ['search', 'name', 'set', 'number', 'limit', 'id']) {
     const v = url.searchParams.get(key);
     if (v) params.set(key, v);
   }
