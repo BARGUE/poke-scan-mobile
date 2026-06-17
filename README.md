@@ -4,7 +4,7 @@
 
 **Scannez vos cartes Pokémon et obtenez leur valeur en temps réel grâce à l'IA.**
 
-Pointez la caméra sur une carte → Claude Vision l'identifie → les prix réels (TCGplayer / Cardmarket) s'affichent → tout est sauvegardé dans votre historique et votre collection.
+Pointez la caméra sur une carte → Claude Vision l'identifie → les prix réels, recoupés sur plusieurs sources (Pokémon TCG, JustTCG, Pokémon Price Tracker), s'affichent → tout est sauvegardé dans votre historique et votre collection.
 
 [![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020?logo=expo&logoColor=white)](https://expo.dev)
 [![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
@@ -22,7 +22,7 @@ Pointez la caméra sur une carte → Claude Vision l'identifie → les prix rée
 | 📷 **Scanner caméra** | Pointez votre téléphone sur une carte, même depuis une photo d'écran (reflets / angle gérés). |
 | 🖼️ **Import galerie** | Analysez une carte à partir d'une image existante. |
 | 🤖 **Identification IA** | Claude Vision détecte nom, set, numéro, rareté, type, HP, année et condition. |
-| 💰 **Prix réels** | TCGplayer (USD) et Cardmarket (EUR) via l'API Pokémon TCG, avec lien vers la fiche. |
+| 💰 **Prix réels multi-sources** | Cotes recoupées sur Pokémon TCG, JustTCG et Pokémon Price Tracker (TCGplayer/USD, Cardmarket/EUR), avec « meilleur prix » et lien vers la fiche. |
 | 📊 **Historique** | Vos 50 derniers scans avec leur valeur estimée. |
 | 📚 **Collection** | Marquez les cartes que vous possédez. |
 | 🌓 **Thème clair / sombre** | Bascule automatique ou manuelle dans les Réglages. |
@@ -89,6 +89,8 @@ pokemon-scanner/
 - Un compte **Cloudflare** (gratuit) — pour héberger le proxy
 - Une clé **Anthropic** — [console.anthropic.com](https://console.anthropic.com/settings/keys)
 - *(optionnel)* une clé **Pokémon TCG** — [dev.pokemontcg.io](https://dev.pokemontcg.io/) (évite le rate limiting)
+- *(optionnel)* une clé **JustTCG** — [justtcg.com](https://justtcg.com/) (source de prix supplémentaire)
+- *(optionnel)* une clé **Pokémon Price Tracker** — [pokemonpricetracker.com](https://www.pokemonpricetracker.com/) (source de prix supplémentaire)
 
 ### 1. Cloner et installer
 
@@ -108,6 +110,8 @@ npm install
 npx wrangler login                          # connexion à Cloudflare
 npx wrangler secret put ANTHROPIC_API_KEY    # colle ta clé sk-ant-...
 npx wrangler secret put POKEMONTCG_API_KEY   # colle ta clé Pokémon TCG (optionnel)
+npx wrangler secret put JUSTTCG_API_KEY      # colle ta clé JustTCG tcg_... (optionnel)
+npx wrangler secret put POKEMONPRICETRACKER_API_KEY  # clé Pokémon Price Tracker (optionnel)
 npm run deploy                               # affiche l'URL publique du Worker
 ```
 
@@ -152,8 +156,12 @@ Définis via `npx wrangler secret put <NOM>` depuis `proxy/` :
 |--------|:------:|-------------|
 | `ANTHROPIC_API_KEY` | ✅ | Clé Anthropic (`sk-ant-...`) pour Claude Vision. |
 | `POKEMONTCG_API_KEY` | ⚪️ | Clé Pokémon TCG. Facultative — sert uniquement à éviter le rate limiting. |
+| `JUSTTCG_API_KEY` | ⚪️ | Clé JustTCG (`tcg_...`). Active la source de prix JustTCG (cotes TCGplayer / USD). |
+| `POKEMONPRICETRACKER_API_KEY` | ⚪️ | Clé Pokémon Price Tracker. Active la source TCGplayer (USD) + CardMarket (EUR). |
 
-> Pour le **dev local** du proxy, créez `proxy/.dev.vars` (déjà gitignoré) avec ces deux variables, puis `npm run dev`.
+> Une source dont le secret n'est pas défini est simplement ignorée : l'app affiche les autres cotes disponibles.
+>
+> Pour le **dev local** du proxy, créez `proxy/.dev.vars` (déjà gitignoré) avec ces variables, puis `npm run dev`.
 
 ---
 
@@ -202,6 +210,7 @@ Le modèle, le prompt et `max_tokens` sont **fixés côté Worker** pour cantonn
 - **AsyncStorage** — historique (50 max) et collection en local
 - **[Claude API](https://anthropic.com)** — Vision (`claude-sonnet-4-6`)
 - **[API Pokémon TCG](https://pokemontcg.io)** — prix TCGplayer / Cardmarket
+- **[JustTCG](https://justtcg.com)** + **[Pokémon Price Tracker](https://www.pokemonpricetracker.com)** — sources de prix complémentaires
 - **[Cloudflare Workers](https://workers.cloudflare.com)** (Wrangler) — proxy sécurisé
 
 ---

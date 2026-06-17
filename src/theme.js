@@ -24,6 +24,8 @@ export const darkColors = {
   cardmarket: '#5AA2F5',
   ebay: '#F5B43C',
   tcgplayer: '#7B61FF',
+  justtcg: '#2DD4BF',
+  pokemonpricetracker: '#F472B6',
 };
 
 // Palette claire.
@@ -52,6 +54,8 @@ export const lightColors = {
   cardmarket: '#2563EB',
   ebay: '#D97706',
   tcgplayer: '#6D28D9',
+  justtcg: '#0D9488',
+  pokemonpricetracker: '#DB2777',
 };
 
 // Couleur de marque (Pokéball, accent rouge) — indépendante du thème.

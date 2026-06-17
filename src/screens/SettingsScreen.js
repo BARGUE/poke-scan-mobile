@@ -107,8 +107,8 @@ export default function SettingsScreen() {
           ['📷', 'Scanner', 'Prenez en photo votre carte ou importez depuis la galerie'],
           ['🤖', 'IA Vision', 'Claude analyse l\'image et identifie le nom, le set et la rareté'],
           ['💰', 'Prix en direct', currency === 'USD'
-            ? 'L\'IA recherche les prix sur TCGplayer et eBay.com (marché US)'
-            : 'L\'IA recherche les prix sur Cardmarket et eBay.fr (marché européen)'],
+            ? 'Les prix sont recoupés sur plusieurs sources US (TCGplayer, JustTCG, Pokémon Price Tracker)'
+            : 'Les prix sont recoupés sur plusieurs sources européennes (Cardmarket, Pokémon Price Tracker) + JustTCG converti en €'],
           ['🗂️', 'Collection', 'Vos cartes sont rangées dans un album permanent ; re-scanner une carte met à jour sa fiche au lieu de créer un doublon'],
           ['🕘', 'Historique', 'Vos 50 derniers scans avec leur valeur estimée, consultable et effaçable'],
         ].map(([emoji, title, desc]) => (
@@ -127,13 +127,14 @@ export default function SettingsScreen() {
         <Text style={styles.sectionTitle}>Sources de prix</Text>
         {(currency === 'USD'
           ? [
-              ['TCGplayer', colors.tcgplayer, 'Référence du marché US (USD)'],
-              ['eBay', colors.ebay, 'eBay.com — marché américain (USD)'],
-              ['Cardmarket', colors.cardmarket, 'Cote européenne, si disponible (USD)'],
+              ['TCGplayer', colors.tcgplayer, 'Référence du marché US (USD) — via pokemontcg.io'],
+              ['JustTCG', colors.justtcg, 'Cotes TCGplayer en temps réel (USD)'],
+              ['Pokémon Price Tracker', colors.pokemonpricetracker, 'TCGplayer + eBay agrégés (USD)'],
             ]
           : [
-              ['Cardmarket', colors.cardmarket, 'Marché européen (EUR)'],
-              ['eBay', colors.ebay, 'eBay.fr — marché français (EUR)'],
+              ['Cardmarket', colors.cardmarket, 'Marché européen (EUR) — via pokemontcg.io'],
+              ['Pokémon Price Tracker', colors.pokemonpricetracker, 'Cote CardMarket européenne (EUR)'],
+              ['JustTCG', colors.justtcg, 'Cote TCGplayer convertie en euros (≈ EUR)'],
             ]
         ).map(([name, color, desc]) => (
           <View key={name} style={styles.sourceRow}>

@@ -95,21 +95,30 @@ export default function CardResultView({
     );
   };
 
-  // Les sources affichées dépendent de ce que l'IA a renvoyé : Cardmarket + eBay
-  // pour le marché EUR, TCGplayer + eBay (+ Cardmarket) pour le marché USD.
-  const SOURCE_ORDER = ['tcgplayer', 'cardmarket', 'ebay'];
+  // Les sources affichées dépendent de ce que chaque API a renvoyé. Plusieurs
+  // fournisseurs peuvent coexister (pokemontcg.io, JustTCG, PokemonPriceTracker) ;
+  // tous sont ramenés à la devise du réglage pour pouvoir être comparés.
+  const SOURCE_ORDER = ['tcgplayer', 'cardmarket', 'justtcg', 'pokemonpricetracker', 'ebay'];
   const sourceMeta = {
-    tcgplayer: { label: 'TCGplayer', color: colors.tcgplayer, sub: 'Marché US' },
-    cardmarket: { label: 'Cardmarket', color: colors.cardmarket, sub: 'Marché EU' },
+    tcgplayer: { label: 'TCGplayer', color: colors.tcgplayer },
+    cardmarket: { label: 'Cardmarket', color: colors.cardmarket },
+    justtcg: { label: 'JustTCG', color: colors.justtcg },
+    pokemonpricetracker: { label: 'Pokémon Price Tracker', color: colors.pokemonpricetracker },
     ebay: { label: 'eBay', color: colors.ebay },
   };
+  const marketSub = { tcgplayer: 'Marché US', cardmarket: 'Marché EU' };
   const sources = SOURCE_ORDER
     .filter(id => prices?.[id])
     .map(id => {
       const data = prices[id];
       const meta = sourceMeta[id];
-      const sub = meta.sub || (data.currency === 'USD' ? 'eBay.com' : 'eBay.fr');
-      return { id, label: meta.label, color: meta.color, sub, data, url: buildSourceUrl(id, card, data.currency) };
+      let sub = marketSub[data.market] || (data.currency === 'USD' ? 'eBay.com' : 'eBay.fr');
+      if (data.approx) sub += ' · ≈ converti $→€';
+      // Lien : on privilégie l'URL directe renvoyée par l'API ; sinon recherche
+      // pré-remplie sur le site du marché correspondant.
+      const direct = (typeof data.url === 'string' && /^https?:\/\//.test(data.url)) ? data.url : null;
+      const url = direct || buildSourceUrl(data.market || id, card, data.currency);
+      return { id, label: meta.label, color: meta.color, sub, data, url };
     });
   const bestSrc = sources.find(s => s.id === prices?.bestDeal) || sources[0];
   // Pour la bannière "Meilleur prix" : on privilégie le lien DIRECT vers la fiche

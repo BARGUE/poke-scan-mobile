@@ -7,14 +7,18 @@
 // est toujours extractible — c'est précisément ce qu'on évite ici.
 //
 // Routes :
-//   POST /identify   body { image: "<base64>" }            -> Claude Vision
-//   GET  /prices?q=<requête lucene>&pageSize=20             -> Pokémon TCG API
+//   POST /identify             body { image: "<base64>" }   -> Claude Vision
+//   GET  /prices?q=<lucene>&pageSize=20                      -> Pokémon TCG API
+//   GET  /justtcg?q=<nom>&game=pokemon                       -> JustTCG API
+//   GET  /pokemonpricetracker?name=<nom>&number=<num>        -> PokemonPriceTracker API
 //
 // Le prompt, le modèle et max_tokens sont fixés ici (et non envoyés par l'app)
 // pour limiter l'usage du proxy au seul cas « identifier une carte Pokémon ».
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const POKEMONTCG_API = 'https://api.pokemontcg.io/v2/cards';
+const JUSTTCG_API = 'https://api.justtcg.com/v1/cards';
+const POKEMONPRICETRACKER_API = 'https://www.pokemonpricetracker.com/api/v1/cards';
 
 const IDENTIFY_PROMPT = `Tu es un expert en cartes Pokémon TCG. Analyse cette image de carte Pokémon et retourne UNIQUEMENT un objet JSON valide (pas de markdown, pas d'explication), avec ces champs exactement :
 {
@@ -71,6 +75,12 @@ export default {
     }
     if (url.pathname === '/prices' && request.method === 'GET') {
       return handlePrices(url, env);
+    }
+    if (url.pathname === '/justtcg' && request.method === 'GET') {
+      return handleJustTcg(url, env);
+    }
+    if (url.pathname === '/pokemonpricetracker' && request.method === 'GET') {
+      return handlePokemonPriceTracker(url, env);
     }
     return json({ error: 'Route inconnue' }, 404);
   },
@@ -135,6 +145,50 @@ async function handlePrices(url, env) {
 
   const target = `${POKEMONTCG_API}?q=${encodeURIComponent(q)}&pageSize=${encodeURIComponent(pageSize)}`;
   const upstream = await fetch(target, { headers });
+  const data = await upstream.json().catch(() => ({ data: [] }));
+  return json(data, upstream.status);
+}
+
+// JustTCG (https://justtcg.com) — cotes basées sur TCGplayer (USD uniquement).
+// La clé secrète (format "tcg_...") est ajoutée ici, jamais expédiée dans l'app.
+async function handleJustTcg(url, env) {
+  if (!env.JUSTTCG_API_KEY) {
+    return json({ error: 'Proxy mal configuré : JUSTTCG_API_KEY manquante.' }, 500);
+  }
+  const params = new URLSearchParams();
+  // game est toujours pokemon ; on ne relaie qu'un petit ensemble de paramètres
+  // pour limiter l'usage du proxy à la recherche de cartes Pokémon.
+  params.set('game', 'pokemon');
+  for (const key of ['q', 'condition', 'printing', 'limit', 'tcgplayerId', 'cardId']) {
+    const v = url.searchParams.get(key);
+    if (v) params.set(key, v);
+  }
+
+  const upstream = await fetch(`${JUSTTCG_API}?${params}`, {
+    headers: { 'Content-Type': 'application/json', 'x-api-key': env.JUSTTCG_API_KEY },
+  });
+  const data = await upstream.json().catch(() => ({ data: [] }));
+  return json(data, upstream.status);
+}
+
+// PokemonPriceTracker (https://pokemonpricetracker.com) — cotes TCGplayer (USD)
+// ET CardMarket (EUR). La clé secrète est passée en Bearer côté serveur.
+async function handlePokemonPriceTracker(url, env) {
+  if (!env.POKEMONPRICETRACKER_API_KEY) {
+    return json({ error: 'Proxy mal configuré : POKEMONPRICETRACKER_API_KEY manquante.' }, 500);
+  }
+  const params = new URLSearchParams();
+  for (const key of ['name', 'set', 'number', 'limit', 'id']) {
+    const v = url.searchParams.get(key);
+    if (v) params.set(key, v);
+  }
+
+  const upstream = await fetch(`${POKEMONPRICETRACKER_API}?${params}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${env.POKEMONPRICETRACKER_API_KEY}`,
+    },
+  });
   const data = await upstream.json().catch(() => ({ data: [] }));
   return json(data, upstream.status);
 }
