@@ -109,7 +109,6 @@ export default function SettingsScreen() {
           ['💰', 'Prix en direct', currency === 'USD'
             ? 'Les prix proviennent de TCGplayer (marché US, USD)'
             : 'Les prix proviennent de Cardmarket (marché européen, EUR)'],
-          ['🗂️', 'Collection', 'Vos cartes sont rangées dans un album permanent ; re-scanner une carte met à jour sa fiche au lieu de créer un doublon'],
           ['🕘', 'Historique', 'Vos 50 derniers scans avec leur valeur estimée, consultable et effaçable'],
         ].map(([emoji, title, desc]) => (
           <View key={title} style={styles.howRow}>

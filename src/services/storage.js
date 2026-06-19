@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { cardSlotId, seriesId } from '../utils/collection';
+import { cardSlotId, setIdOf } from '../utils/collection';
 
 const HISTORY_KEY = 'pokemon_scan_history';
 const COLLECTION_KEY = 'pokemon_collection';
@@ -8,6 +8,9 @@ export async function saveToHistory(card, prices, imageUri) {
   try {
     const existing = await getHistory();
     const bestSource = prices[prices.bestDeal];
+    // Set confirmé par l'API (cf. prices.js) : quand on l'a, il fournit une année
+    // de sortie fiable. Le libellé affiché reste celui de l'IA (français).
+    const matchedSet = prices?.matchedSet || null;
     const entry = {
       id: Date.now().toString(),
       name: card.name,
@@ -18,7 +21,7 @@ export async function saveToHistory(card, prices, imageUri) {
       rarity: card.rarity,
       type: card.type,
       hp: card.hp,
-      year: card.year,
+      year: matchedSet?.year || card.year,
       condition: card.condition,
       imageUri,
       prices,
@@ -29,20 +32,20 @@ export async function saveToHistory(card, prices, imageUri) {
     };
     const updated = [entry, ...existing].slice(0, 50);
     await AsyncStorage.setItem(HISTORY_KEY, JSON.stringify(updated));
-    // La collection est un stockage permanent : on y ajoute aussi la carte,
-    // indépendamment de l'historique (qui, lui, est limité et effaçable).
-    await addToCollection(entry);
+    // La collection est un album permanent (non limité, distinct de l'historique).
+    // On n'y range la carte que si l'API a CONFIRMÉ son set (matchedSet) : sans
+    // ça on ne connaît ni le bon nom de set ni la taille de la grille.
+    if (matchedSet) await addToCollection(entry);
     return entry;
   } catch (e) {
     console.error('Erreur sauvegarde historique', e);
   }
 }
 
-// --- Collection (album permanent) ---------------------------------------
-// L'identité d'un emplacement (année + taille de série + numéro) est calculée
-// par cardSlotId : elle ignore le libellé exact du set, que l'IA renvoie de
-// façon inconsistante. Re-scanner la même carte met à jour l'emplacement au
-// lieu de créer un doublon, même si l'IA nomme le set différemment.
+// --- Collection (album permanent par set) -------------------------------
+// L'identité d'un emplacement (set officiel + numéro, cf. utils/collection.js)
+// ignore les variations de libellé : re-scanner la même carte met à jour
+// l'emplacement au lieu de créer un doublon.
 
 export async function getCollection() {
   try {
@@ -71,10 +74,10 @@ export async function removeFromCollection(id) {
   await AsyncStorage.setItem(COLLECTION_KEY, JSON.stringify(updated));
 }
 
-// Retire toutes les cartes d'une série (identifiée par seriesId).
-export async function removeSeriesFromCollection(key) {
+// Retire toutes les cartes d'un set (identifié par son id officiel).
+export async function removeSetFromCollection(setId) {
   const existing = await getCollection();
-  const updated = existing.filter(item => seriesId(item) !== key);
+  const updated = existing.filter(item => setIdOf(item) !== setId);
   await AsyncStorage.setItem(COLLECTION_KEY, JSON.stringify(updated));
 }
 

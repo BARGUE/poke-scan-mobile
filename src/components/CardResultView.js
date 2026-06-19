@@ -8,28 +8,6 @@ import { FONTS, RADIUS, SHADOWS, RARITY_COLORS } from '../theme';
 import { useTheme } from '../ThemeContext';
 import { translateCondition, translateType, formatDateFr } from '../utils/translations';
 
-// Construit l'URL de recherche de la carte sur le site marchand.
-// On ne connaît pas l'ID produit exact, donc on ouvre une recherche
-// pré-remplie avec le nom + numéro de la carte.
-function buildSourceUrl(sourceId, card, marketCurrency = 'EUR') {
-  if (!card) return null;
-  const number = (card.number || '').split('/')[0].trim();
-  if (sourceId === 'cardmarket') {
-    const q = [card.nameEn || card.name, number].filter(Boolean).join(' ');
-    return `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(q)}`;
-  }
-  if (sourceId === 'ebay') {
-    const q = [card.nameEn || card.name, card.number, 'pokemon'].filter(Boolean).join(' ');
-    const domain = marketCurrency === 'USD' ? 'ebay.com' : 'ebay.fr';
-    return `https://www.${domain}/sch/i.html?_nkw=${encodeURIComponent(q)}`;
-  }
-  if (sourceId === 'tcgplayer') {
-    const q = [card.nameEn || card.name, number].filter(Boolean).join(' ');
-    return `https://www.tcgplayer.com/search/pokemon/product?q=${encodeURIComponent(q)}`;
-  }
-  return null;
-}
-
 async function openSource(url) {
   if (!url) return;
   try {
@@ -112,17 +90,16 @@ export default function CardResultView({
       const meta = sourceMeta[id];
       let sub = marketSub[data.market] || (data.currency === 'USD' ? 'eBay.com' : 'eBay.fr');
       if (data.approx) sub += ' · ≈ converti $→€';
-      // Lien : on privilégie l'URL directe renvoyée par l'API ; sinon recherche
-      // pré-remplie sur le site du marché correspondant.
-      const direct = (typeof data.url === 'string' && /^https?:\/\//.test(data.url)) ? data.url : null;
-      const url = direct || buildSourceUrl(data.market || id, card, data.currency);
+      // Lien : uniquement l'URL directe renvoyée par l'API (carte/édition
+      // confirmée). Sinon `url` reste null et on NE redirige PAS — le prix est
+      // une estimation, ouvrir une recherche pré-remplie n'apporterait rien.
+      const url = (typeof data.url === 'string' && /^https?:\/\//.test(data.url)) ? data.url : null;
       return { id, label: meta.label, color: meta.color, sub, data, url };
     });
   const bestSrc = sources.find(s => s.id === prices?.bestDeal) || sources[0];
-  // Pour la bannière "Meilleur prix" : on privilégie le lien DIRECT vers la fiche
-  // renvoyé par l'IA s'il est valide, sinon on retombe sur la recherche pré-remplie.
-  const aiUrl = bestSrc?.data?.url;
-  const bestDealUrl = (typeof aiUrl === 'string' && /^https?:\/\//.test(aiUrl)) ? aiUrl : bestSrc?.url;
+  // Bannière "Meilleur prix" : on n'ouvre QUE s'il existe une URL directe vers la
+  // fiche (sinon `null` → bouton désactivé, pas de redirection vers une recherche).
+  const bestDealUrl = bestSrc?.url || null;
 
   return (
     <ScrollView
@@ -157,7 +134,7 @@ export default function CardResultView({
         <Text style={styles.sectionTitle}>Prix du marché</Text>
         {prices?.estimated && (
           <View style={styles.estimateNote}>
-            <Ionicons name="information-circle-outline" size={14} color={colors.textSecondary} />
+            <Ionicons name="warning-outline" size={16} color={colors.amber} />
             <Text style={styles.estimateNoteText}>
               Estimation indicative : aucune cote de marché trouvée pour cette carte.
             </Text>
@@ -243,8 +220,8 @@ const makeStyles = (COLORS) => StyleSheet.create({
   bestDealBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.successLight, borderRadius: RADIUS.md, padding: 12, marginTop: 12 },
   bestDealText: { fontSize: FONTS.size.sm, color: COLORS.success, flex: 1 },
 
-  estimateNote: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  estimateNoteText: { fontSize: FONTS.size.xs, color: COLORS.textSecondary, flex: 1, lineHeight: 16 },
+  estimateNote: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.amberLight, borderWidth: 0.5, borderColor: COLORS.amber, borderRadius: RADIUS.md, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 12 },
+  estimateNoteText: { fontSize: FONTS.size.xs, color: COLORS.amber, flex: 1, lineHeight: 16, fontWeight: '500' },
   updatedAt: { fontSize: FONTS.size.xs, color: COLORS.textTertiary, marginTop: 10, textAlign: 'center' },
 
   detailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 0.5, borderBottomColor: COLORS.border },

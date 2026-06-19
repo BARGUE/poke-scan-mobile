@@ -19,6 +19,10 @@ import CardResultView from '../components/CardResultView';
 
 const { width, height: screenH } = Dimensions.get('window');
 
+// Largeur cible de la carte recadrée : assez grande pour rester nette (lecture
+// du numéro/set par l'IA), assez petite pour ne pas alourdir l'envoi.
+const CROP_TARGET_W = 1100;
+
 const LOAD_STEPS = [
   { icon: 'scan-outline', label: 'Analyse de la carte par IA…' },
   { icon: 'library-outline', label: 'Identification du set et numéro…' },
@@ -76,6 +80,7 @@ export default function ScannerScreen() {
   const isFocused = useIsFocused();
   const cameraRef = useRef(null);
   const frameRef = useRef(null);
+  const previewRef = useRef(null);
   const cancelledRef = useRef(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState('back');
@@ -105,6 +110,7 @@ export default function ScannerScreen() {
 
     try {
       const card = await identifyCard(base64);
+      console.log('[SCAN] identifyCard →', JSON.stringify(card, null, 2));
       if (cancelledRef.current) { stopSteps(); return; }
       if (!card.found) {
         stopSteps();
@@ -112,11 +118,25 @@ export default function ScannerScreen() {
         setPhase('error');
         return;
       }
-      setCardInfo(card);
       const priceData = await fetchCardPrices(card, currency);
+      console.log('[SCAN] fetchCardPrices →', JSON.stringify(priceData, null, 2));
       if (cancelledRef.current) { stopSteps(); return; }
+
+      // L'IA se trompe parfois sur le set. Si l'API a confirmé l'édition exacte
+      // (matchedSet), on l'utilise comme source de vérité pour le nom du set.
+      const matchedSet = priceData.matchedSet;
+      const enrichedCard = matchedSet
+        ? {
+            ...card,
+            set: matchedSet.name || card.set,
+            setCode: matchedSet.id || card.setCode,
+            year: matchedSet.year || card.year,
+          }
+        : card;
+
+      setCardInfo(enrichedCard);
       setPrices(priceData);
-      await saveToHistory(card, priceData, uri);
+      await saveToHistory(enrichedCard, priceData, uri);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       stopSteps();
       setPhase('result');
@@ -128,54 +148,80 @@ export default function ScannerScreen() {
     }
   }, [runLoadingSteps, currency]);
 
-  // Mesure la position du cadre de visée dans la fenêtre (coordonnées écran).
-  const measureFrame = useCallback(() => new Promise((resolve) => {
-    if (!frameRef.current) return resolve(null);
-    frameRef.current.measureInWindow((x, y, w, h) => resolve({ x, y, w, h }));
+  // Mesure un élément dans la fenêtre (coordonnées écran), en promesse.
+  const measureInWindow = useCallback((ref) => new Promise((resolve) => {
+    if (!ref.current) return resolve(null);
+    ref.current.measureInWindow((x, y, w, h) => resolve({ x, y, w, h }));
   }), []);
 
   // Recadre la photo capturée sur la zone du cadre affiché à l'écran.
-  // L'aperçu caméra est en mode "cover" : il remplit la fenêtre (hauteur = écran
-  // moins la barre du bas) en rognant le débord. On reproduit ce mapping pour
-  // retrouver, en pixels de la photo, le rectangle qui correspond au cadre.
+  // L'aperçu caméra est en mode "cover" : il remplit sa zone en rognant le
+  // débord. On mesure la vraie position/dimension de l'aperçu (et non on la
+  // suppose) puis on exprime le cadre relativement à lui, afin que le mapping
+  // reste juste quelle que soit la barre d'état / les insets de l'appareil.
+  //
+  // On découpe à la résolution native (aucune perte), puis on redimensionne à
+  // CROP_TARGET_W pour garder une carte nette sans alourdir, et on ré-encode
+  // UNE SEULE FOIS en JPEG haute qualité (pas de double compression).
   const cropToFrame = useCallback(async (photo) => {
+    let actions = [];
+
     try {
-      const frame = await measureFrame();
-      if (!frame || !photo.width || !photo.height) return photo;
+      const [frame, preview] = await Promise.all([
+        measureInWindow(frameRef),
+        measureInWindow(previewRef),
+      ]);
+      if (frame && preview && preview.w && preview.h && photo.width && photo.height) {
+        const camW = preview.w;             // dimensions réelles de l'aperçu
+        const camH = preview.h;
+        const fx = frame.x - preview.x;     // cadre relatif à l'aperçu
+        const fy = frame.y - preview.y;
+        const { width: pw, height: ph } = photo;
 
-      const camW = width;
-      const camH = screenH - insets.bottom; // zone réellement occupée par la caméra
-      const { width: pw, height: ph } = photo;
+        const s = Math.max(camW / pw, camH / ph); // échelle "cover"
+        const originX = (fx + (pw * s - camW) / 2) / s;
+        const originY = (fy + (ph * s - camH) / 2) / s;
+        const cropW = frame.w / s;
+        const cropH = frame.h / s;
 
-      const s = Math.max(camW / pw, camH / ph); // échelle "cover"
-      const originX = ((frame.x) + (pw * s - camW) / 2) / s;
-      const originY = ((frame.y) + (ph * s - camH) / 2) / s;
-      const cropW = frame.w / s;
-      const cropH = frame.h / s;
+        const crop = {
+          originX: Math.max(0, Math.min(originX, pw - 1)),
+          originY: Math.max(0, Math.min(originY, ph - 1)),
+          width: Math.max(1, Math.min(cropW, pw)),
+          height: Math.max(1, Math.min(cropH, ph)),
+        };
 
-      const crop = {
-        originX: Math.max(0, Math.min(originX, pw - 1)),
-        originY: Math.max(0, Math.min(originY, ph - 1)),
-        width: Math.max(1, Math.min(cropW, pw)),
-        height: Math.max(1, Math.min(cropH, ph)),
-      };
-
-      const result = await manipulateAsync(
-        photo.uri,
-        [{ crop }],
-        { base64: true, compress: 0.8, format: SaveFormat.JPEG },
-      );
-      return result;
+        actions.push({ crop });
+        if (crop.width > CROP_TARGET_W) {
+          actions.push({ resize: { width: CROP_TARGET_W } });
+        }
+      } else if (photo.width > CROP_TARGET_W) {
+        // Pas de cadre mesurable : on garde la photo entière mais on borne sa taille.
+        actions.push({ resize: { width: CROP_TARGET_W } });
+      }
     } catch (e) {
       console.warn('Recadrage impossible, photo entière utilisée', e);
-      return photo; // en cas d'échec, on garde la photo complète
+      actions = [];
     }
-  }, [measureFrame, insets.bottom]);
+
+    try {
+      return await manipulateAsync(
+        photo.uri,
+        actions,
+        { base64: true, compress: 0.92, format: SaveFormat.JPEG },
+      );
+    } catch (e) {
+      console.warn('Ré-encodage impossible, photo brute utilisée', e);
+      return photo; // dernier recours
+    }
+  }, [measureInWindow]);
 
   const capturePhoto = useCallback(async () => {
     if (!cameraRef.current) return;
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.8 });
+    // Capture en qualité maximale ; la compression finale est faite une seule
+    // fois dans cropToFrame. Pas besoin du base64 ici (on ré-encode ensuite).
+    const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
     const cropped = await cropToFrame(photo);
     await analyze(cropped.uri, cropped.base64);
   }, [analyze, cropToFrame]);
@@ -288,6 +334,7 @@ export default function ScannerScreen() {
   if (phase === 'camera') {
     return (
       <View style={[styles.cameraScreen, { paddingBottom: insets.bottom }]}>
+       <View ref={previewRef} collapsable={false} style={styles.camera}>
         <CameraView ref={cameraRef} style={styles.camera} facing={facing} active={isFocused}>
           <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
             <TouchableOpacity style={styles.cameraBackBtn} onPress={reset}>
@@ -309,7 +356,7 @@ export default function ScannerScreen() {
               <View style={[styles.corner, styles.cornerBL]} />
               <View style={[styles.corner, styles.cornerBR]} />
             </View>
-            <Text style={styles.frameHint}>Centrez la carte dans le cadre</Text>
+            <Text style={styles.frameHint}>Alignez la carte au plus près des bords du cadre</Text>
           </View>
 
           <View style={styles.bottomBar}>
@@ -322,6 +369,7 @@ export default function ScannerScreen() {
             <View style={{ width: 52 }} />
           </View>
         </CameraView>
+       </View>
       </View>
     );
   }

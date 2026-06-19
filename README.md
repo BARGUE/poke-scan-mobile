@@ -4,7 +4,7 @@
 
 **Scannez vos cartes Pokémon et obtenez leur valeur en temps réel grâce à l'IA.**
 
-Pointez la caméra sur une carte → Claude Vision l'identifie → les prix réels (TCGplayer en USD, Cardmarket en EUR, via Pokémon TCG) s'affichent → tout est sauvegardé dans votre historique et votre collection.
+Pointez la caméra sur une carte → Claude Vision l'identifie → les prix réels (TCGplayer en USD, Cardmarket en EUR, via Pokémon TCG) s'affichent → tout est sauvegardé dans votre historique.
 
 [![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020?logo=expo&logoColor=white)](https://expo.dev)
 [![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
@@ -24,7 +24,6 @@ Pointez la caméra sur une carte → Claude Vision l'identifie → les prix rée
 | 🤖 **Identification IA** | Claude Vision détecte nom, set, numéro, rareté, type, HP, année et condition. |
 | 💰 **Prix réels** | Cotes issues de Pokémon TCG (TCGplayer/USD ou Cardmarket/EUR selon la devise réglée), avec lien vers la fiche. |
 | 📊 **Historique** | Vos 50 derniers scans avec leur valeur estimée. |
-| 📚 **Collection** | Marquez les cartes que vous possédez. |
 | 🌓 **Thème clair / sombre** | Bascule automatique ou manuelle dans les Réglages. |
 | 🔒 **Clés API protégées** | Aucune clé secrète dans l'app : tout passe par un proxy Cloudflare Worker. |
 
@@ -63,14 +62,13 @@ pokemon-scanner/
 │   ├── screens/
 │   │   ├── ScannerScreen.js    # Caméra + analyse + résultats
 │   │   ├── HistoryScreen.js    # Historique des scans
-│   │   ├── CollectionScreen.js # Cartes possédées
 │   │   └── SettingsScreen.js   # Réglages (thème, devise, infos)
 │   ├── components/
 │   │   └── CardResultView.js   # Affichage d'une carte identifiée + prix
 │   └── services/
 │       ├── anthropic.js        # POST proxy /identify → Claude Vision
 │       ├── prices.js           # GET proxy /prices  → API Pokémon TCG
-│       └── storage.js          # AsyncStorage (historique + collection)
+│       └── storage.js          # AsyncStorage (historique)
 │
 └── proxy/                      # Cloudflare Worker — détient les clés secrètes
     ├── src/index.js            # Routes /identify et /prices
@@ -201,7 +199,7 @@ Le modèle, le prompt et `max_tokens` sont **fixés côté Worker** pour cantonn
 - **[Expo](https://expo.dev)** (SDK 54) + **[React Native](https://reactnative.dev)** 0.81 / **React** 19
 - **[React Navigation](https://reactnavigation.org)** — onglets + stack
 - **[expo-camera](https://docs.expo.dev/versions/latest/sdk/camera/)**, `expo-image-picker`, `expo-image-manipulator`, `expo-haptics`
-- **AsyncStorage** — historique (50 max) et collection en local
+- **AsyncStorage** — historique (50 max) en local
 - **[Claude API](https://anthropic.com)** — Vision (`claude-sonnet-4-6`)
 - **[API Pokémon TCG](https://pokemontcg.io)** — prix TCGplayer (USD) / Cardmarket (EUR)
 - **[Cloudflare Workers](https://workers.cloudflare.com)** (Wrangler) — proxy sécurisé

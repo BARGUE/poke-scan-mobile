@@ -21,8 +21,6 @@ const IDENTIFY_PROMPT = `Tu es un expert en cartes Pokémon TCG. Analyse cette i
   "found": true,
   "name": "Nom de la carte en français si possible",
   "nameEn": "Nom anglais officiel",
-  "set": "Nom OFFICIEL et COMPLET du set en français, tel qu'imprimé sur la carte (ex: « Expédition de base », pas « Expédition ») ; utilise toujours le même libellé pour un set donné",
-  "setCode": "Code du set ex: sv3",
   "number": "Numéro de carte AVEC le total quand il est visible, ex: 025/165",
   "rarity": "Common|Uncommon|Rare|Holo Rare|Ultra Rare|Secret Rare|Special Illustration Rare",
   "type": "Type Pokémon ou Trainer/Energy",

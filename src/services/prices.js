@@ -80,18 +80,27 @@ async function queryCards(q) {
 // On tente d'abord la requête la plus précise (nom + numéro), puis on
 // relâche les contraintes si rien ne correspond.
 //
-// Renvoie { match, confident } : `confident` vaut true seulement si le SET a
-// été confirmé par un signal fort (total imprimé ou code de set identiques).
-// Sans cette confirmation, plusieurs éditions de la même carte (même nom +
-// numéro) sont indiscernables et l'URL directe pourrait pointer vers la
-// mauvaise collection — on la masquera alors en amont.
+// Renvoie { match, confident } : `confident` vaut true seulement si on a
+// identifié l'édition EXACTE, c.-à-d. (1) un signal fort (total imprimé ou code
+// de set) ET (2) aucune autre édition (set différent) à égalité de score. Sans
+// ces deux conditions, plusieurs éditions de la même carte (même nom + numéro,
+// parfois même taille de set) sont indiscernables : l'URL directe pourrait
+// ouvrir la mauvaise carte (visuel différent) — on la masquera alors en amont.
 async function findCard(card) {
-  const name = card.nameEn || card.name;
+  // pokemontcg.io est une base anglaise : on privilégie `nameEn`, mais on essaie
+  // AUSSI le nom (souvent en français) car `nameEn` peut manquer ou être imparfait.
+  // Dédoublonné (insensible à la casse) pour ne pas relancer la même requête.
+  const names = [card.nameEn, card.name]
+    .map(n => String(n || '').trim())
+    .filter(Boolean)
+    .filter((n, i, arr) => arr.findIndex(o => o.toLowerCase() === n.toLowerCase()) === i);
   const parsed = parseNumber(card.number);
   const num = parsed.num;
   const attempts = [];
-  if (name && num) attempts.push(`name:"${escapeQuery(name)}" number:"${escapeQuery(num)}"`);
-  if (name) attempts.push(`name:"${escapeQuery(name)}"`);
+  // D'abord les requêtes les plus précises (nom + numéro) pour TOUS les noms,
+  // puis on relâche en cherchant par nom seul.
+  if (num) for (const name of names) attempts.push(`name:"${escapeQuery(name)}" number:"${escapeQuery(num)}"`);
+  for (const name of names) attempts.push(`name:"${escapeQuery(name)}"`);
 
   for (const q of attempts) {
     let results;
@@ -114,7 +123,20 @@ async function findCard(card) {
       .sort((a, b) => (b.score - a.score) || (hasPrices(b.r) - hasPrices(a.r)));
 
     const best = scored[0];
-    return { match: best.r, confident: best.score >= STRONG_SET_SCORE };
+    const strong = best.score >= STRONG_SET_SCORE;
+    // Ambigu : une autre carte, d'un SET DIFFÉRENT, atteint le même score que la
+    // meilleure. On ne peut alors pas trancher l'édition exacte de façon fiable.
+    const bestSetId = best.r.set?.id;
+    const ambiguous = scored.some(s =>
+      s !== best && s.r.set?.id && s.r.set.id !== bestSetId && s.score >= best.score
+    );
+    // Garde-fou « même édition = même taille de set » : si la carte scannée porte
+    // un total (« /Y »), l'édition retenue doit avoir EXACTEMENT cette taille,
+    // sinon le visuel diffère et le lien direct mènerait à une autre carte.
+    const bestTotal = best.r.set?.printedTotal ?? best.r.set?.total ?? null;
+    const totalOk = !parsed.total || (bestTotal != null && bestTotal === parsed.total);
+
+    return { match: best.r, confident: strong && !ambiguous && totalOk };
   }
   return { match: null, confident: false };
 }
@@ -194,12 +216,21 @@ async function fetchFromPokemonTcg(card, currency) {
     const source = isUsd
       ? fromTcgplayer(match?.tcgplayer, card.rarity)
       : fromCardmarket(match?.cardmarket);
-    if (!source) return null;
     // Set non confirmé : l'URL directe risque de mener à une autre édition de la
     // carte (image différente). On l'efface pour que CardResultView retombe sur
     // une recherche pré-remplie nom + numéro, qui reste cohérente.
-    if (!confident) source.url = null;
-    return { id: isUsd ? 'tcgplayer' : 'cardmarket', source };
+    if (source && !confident) source.url = null;
+
+    // Set CONFIRMÉ par l'API (signal fort uniquement) : sert à fournir une année
+    // de sortie fiable à l'historique. Sinon on risquerait une mauvaise édition.
+    const set = confident && match?.set ? {
+      id: match.set.id,
+      name: match.set.name,
+      printedTotal: match.set.printedTotal ?? match.set.total ?? null,
+      year: String(match.set.releaseDate || '').slice(0, 4),
+    } : null;
+
+    return { id: isUsd ? 'tcgplayer' : 'cardmarket', source: source || null, set };
   } catch {
     return null;
   }
@@ -209,11 +240,21 @@ async function fetchFromPokemonTcg(card, currency) {
 
 export async function fetchCardPrices(card, currency = 'EUR') {
   const result = await fetchFromPokemonTcg(card, currency);
-  if (!result) return generateFallbackPrices(card.rarity, currency);
 
-  const prices = { [result.id]: result.source };
-  prices.bestDeal = result.id;
-  prices.lastUpdated = result.source.updatedAt || '';
+  let prices;
+  if (result && result.source) {
+    prices = {
+      [result.id]: result.source,
+      bestDeal: result.id,
+      lastUpdated: result.source.updatedAt || '',
+    };
+  } else {
+    // Pas de cote exploitable : estimation par rareté. On conserve quand même le
+    // set confirmé s'il a été identifié (pour l'année fiable de l'historique).
+    prices = generateFallbackPrices(card.rarity, currency);
+  }
+
+  if (result && result.set) prices.matchedSet = result.set;
   return prices;
 }
 
