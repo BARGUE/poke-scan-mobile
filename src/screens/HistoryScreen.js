@@ -1,15 +1,23 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
-  Image, Alert, RefreshControl, Modal,
+  Image, Alert, RefreshControl, Modal, TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getHistory, deleteFromHistory, clearHistory } from '../services/storage';
+import { toEur } from '../services/prices';
 import { FONTS, RADIUS, SHADOWS, RARITY_COLORS } from '../theme';
 import { useTheme } from '../ThemeContext';
 import CardResultView from '../components/CardResultView';
+
+const SOURCE_LABELS = { cardmarket: 'Cardmarket', tcgplayer: 'TCGplayer' };
+
+// Normalise pour la recherche : minuscules, sans accents.
+function fold(str) {
+  return String(str || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
 
 function formatDate(iso) {
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -32,15 +40,21 @@ function HistoryItem({ item, onDelete, onPress }) {
         )}
         <View style={styles.itemMeta}>
           <Text style={styles.itemName} numberOfLines={1}>{item.emoji} {item.name}</Text>
-          <Text style={styles.itemSet}>{item.set} · {item.number}</Text>
-          <View style={[styles.badge, { backgroundColor: rarityStyle.bg }]}>
-            <Text style={[styles.badgeText, { color: rarityStyle.text }]}>{item.rarity}</Text>
-          </View>
+          <Text style={styles.itemSet} numberOfLines={1}>
+            {[item.set, item.number].filter(Boolean).join(' · ') || 'Set inconnu'}
+          </Text>
+          {!!item.rarity && (
+            <View style={[styles.badge, { backgroundColor: rarityStyle.bg }]}>
+              <Text style={[styles.badgeText, { color: rarityStyle.text }]}>{item.rarity}</Text>
+            </View>
+          )}
           <Text style={styles.itemDate}>{formatDate(item.scannedAt)}</Text>
         </View>
         <View style={styles.itemRight}>
-          <Text style={styles.itemPrice}>{formatPrice(item.bestPrice, item.bestCurrency)}</Text>
-          <Text style={styles.itemPriceSub}>{item.bestSource}</Text>
+          <Text style={styles.itemPrice}>
+            {item.prices?.estimated ? '≈ ' : ''}{formatPrice(item.bestPrice, item.bestCurrency)}
+          </Text>
+          <Text style={styles.itemPriceSub}>{SOURCE_LABELS[item.bestSource] || item.bestSource}</Text>
           <TouchableOpacity onPress={() => onDelete(item.id)} style={styles.deleteBtn}>
             <Ionicons name="trash-outline" size={16} color={colors.textTertiary} />
           </TouchableOpacity>
@@ -58,6 +72,7 @@ export default function HistoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState(null);
   const [currencyFilter, setCurrencyFilter] = useState('all'); // 'all' | 'EUR' | 'USD'
+  const [query, setQuery] = useState('');
 
   const load = useCallback(async () => {
     setHistory(await getHistory());
@@ -95,12 +110,15 @@ export default function HistoryScreen() {
     ]);
   };
 
-  // Filtre par devise de détection (€ Cardmarket / $ TCGplayer).
-  const filteredHistory = useMemo(() => (
-    currencyFilter === 'all'
-      ? history
-      : history.filter(item => (item.bestCurrency || 'EUR') === currencyFilter)
-  ), [history, currencyFilter]);
+  // Filtre par devise de détection (€ Cardmarket / $ TCGplayer) puis par texte
+  // (nom FR/EN, set, numéro).
+  const filteredHistory = useMemo(() => {
+    const q = fold(query.trim());
+    return history.filter(item =>
+      (currencyFilter === 'all' || (item.bestCurrency || 'EUR') === currencyFilter)
+      && (!q || fold([item.name, item.nameEn, item.set, item.number].join(' ')).includes(q))
+    );
+  }, [history, currencyFilter, query]);
 
   // Valeur estimée des cartes affichées. Si un filtre devise est actif, toutes
   // les cartes sont dans la même devise : on somme et on affiche tel quel. En
@@ -108,8 +126,7 @@ export default function HistoryScreen() {
   const totalCurrency = currencyFilter === 'all' ? 'EUR' : currencyFilter;
   const totalValue = filteredHistory.reduce((sum, item) => {
     const v = item.bestPrice || 0;
-    if (currencyFilter === 'all') return sum + (item.bestCurrency === 'USD' ? v / 1.08 : v);
-    return sum + v;
+    return sum + (currencyFilter === 'all' ? toEur(v, item.bestCurrency) : v);
   }, 0);
 
   return (
@@ -159,6 +176,20 @@ export default function HistoryScreen() {
               );
             })}
           </View>
+
+          <View style={styles.searchBox}>
+            <Ionicons name="search" size={16} color={colors.textTertiary} />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Rechercher une carte, un set…"
+              placeholderTextColor={colors.textTertiary}
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+          </View>
         </>
       )}
 
@@ -173,10 +204,10 @@ export default function HistoryScreen() {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Text style={styles.emptyEmoji}>🃏</Text>
-            {currencyFilter !== 'all' && history.length > 0 ? (
+            {history.length > 0 ? (
               <>
-                <Text style={styles.emptyTitle}>Aucune carte en {currencyFilter}</Text>
-                <Text style={styles.emptySub}>Aucun scan ne correspond à ce filtre de devise.</Text>
+                <Text style={styles.emptyTitle}>Aucun résultat</Text>
+                <Text style={styles.emptySub}>Aucun scan ne correspond à ces filtres.</Text>
               </>
             ) : (
               <>
@@ -226,6 +257,9 @@ const makeStyles = (COLORS) => StyleSheet.create({
   segmentItemActive: { backgroundColor: COLORS.primary },
   segmentText: { fontSize: FONTS.size.sm, fontWeight: '500', color: COLORS.textSecondary },
   segmentTextActive: { color: COLORS.textOnPrimary },
+
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.surface, borderRadius: RADIUS.md, paddingHorizontal: 12, marginHorizontal: 16, marginBottom: 12, borderWidth: 0.5, borderColor: COLORS.border },
+  searchInput: { flex: 1, paddingVertical: 10, fontSize: FONTS.size.md, color: COLORS.textPrimary },
 
   list: { paddingHorizontal: 16, gap: 10, paddingTop: 4 },
 

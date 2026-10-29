@@ -22,9 +22,10 @@ export function ThemeProvider({ children }) {
   useEffect(() => {
     AsyncStorage.multiGet([SCHEME_KEY, CURRENCY_KEY]).then(entries => {
       const map = Object.fromEntries(entries);
-      if (map[SCHEME_KEY]) setSchemeState(map[SCHEME_KEY]);
-      if (map[CURRENCY_KEY]) setCurrencyState(map[CURRENCY_KEY]);
-    });
+      // On ignore toute valeur inattendue plutôt que de casser le thème.
+      if (['system', 'light', 'dark'].includes(map[SCHEME_KEY])) setSchemeState(map[SCHEME_KEY]);
+      if (LOCALES[map[CURRENCY_KEY]]) setCurrencyState(map[CURRENCY_KEY]);
+    }).catch(() => {});
   }, []);
 
   const setScheme = useCallback((next) => {

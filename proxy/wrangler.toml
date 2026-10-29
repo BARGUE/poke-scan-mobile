@@ -1,6 +1,6 @@
 name = "pokemon-scanner-proxy"
 main = "src/index.js"
-compatibility_date = "2024-09-01"
+compatibility_date = "2026-10-01"
 
 # Les clés API ne sont PAS écrites ici (ce fichier est versionné).
 # On les fournit comme "secrets" chiffrés, en ligne de commande :

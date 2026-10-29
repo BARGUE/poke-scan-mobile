@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { clearHistory, clearCollection, HISTORY_LIMIT } from '../services/storage';
 import { FONTS, RADIUS, SHADOWS } from '../theme';
 import { useTheme } from '../ThemeContext';
 
@@ -64,6 +65,7 @@ export default function SettingsScreen() {
           value={scheme}
           onChange={setScheme}
           options={[
+            { value: 'system', label: 'Système', icon: 'phone-portrait-outline' },
             { value: 'light', label: 'Clair', icon: 'sunny-outline' },
             { value: 'dark', label: 'Sombre', icon: 'moon-outline' },
           ]}
@@ -109,7 +111,8 @@ export default function SettingsScreen() {
           ['💰', 'Prix en direct', currency === 'USD'
             ? 'Les prix proviennent de TCGplayer (marché US, USD)'
             : 'Les prix proviennent de Cardmarket (marché européen, EUR)'],
-          ['🕘', 'Historique', 'Vos 50 derniers scans avec leur valeur estimée, consultable et effaçable'],
+          ['🕘', 'Historique', `Vos ${HISTORY_LIMIT} derniers scans avec leur valeur estimée, consultable et effaçable`],
+          ['🗂️', 'Collection', 'Les cartes dont le set est confirmé sont rangées dans leur album, set par set'],
         ].map(([emoji, title, desc]) => (
           <View key={title} style={styles.howRow}>
             <Text style={styles.howEmoji}>{emoji}</Text>
@@ -139,6 +142,28 @@ export default function SettingsScreen() {
               <Text style={styles.sourceDesc}>{desc}</Text>
             </View>
           </View>
+        ))}
+      </View>
+
+      {/* Données */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Données</Text>
+        {[
+          ['time-outline', "Vider l'historique", "Supprimer tous les scans de l'historique ? Votre collection est conservée.", clearHistory],
+          ['albums-outline', 'Vider la collection', 'Supprimer toutes les cartes de votre collection ? Cette action est irréversible.', clearCollection],
+        ].map(([icon, label, message, action]) => (
+          <TouchableOpacity
+            key={label}
+            style={styles.dangerRow}
+            activeOpacity={0.7}
+            onPress={() => Alert.alert(label, message, [
+              { text: 'Annuler', style: 'cancel' },
+              { text: 'Supprimer', style: 'destructive', onPress: () => action() },
+            ])}
+          >
+            <Ionicons name={icon} size={18} color={colors.primary} />
+            <Text style={styles.dangerText}>{label}</Text>
+          </TouchableOpacity>
         ))}
       </View>
 
@@ -174,6 +199,9 @@ const makeStyles = (COLORS) => StyleSheet.create({
   sourceDot: { width: 12, height: 12, borderRadius: 6 },
   sourceName: { fontSize: FONTS.size.md, fontWeight: '500', color: COLORS.textPrimary },
   sourceDesc: { fontSize: FONTS.size.sm, color: COLORS.textSecondary },
+
+  dangerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, borderBottomWidth: 0.5, borderBottomColor: COLORS.border },
+  dangerText: { fontSize: FONTS.size.md, color: COLORS.primary },
 
   footer: { textAlign: 'center', fontSize: FONTS.size.xs, color: COLORS.textTertiary, marginTop: 8, marginBottom: 20 },
 });

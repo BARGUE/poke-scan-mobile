@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,12 +23,29 @@ const { width, height: screenH } = Dimensions.get('window');
 // du numéro/set par l'IA), assez petite pour ne pas alourdir l'envoi.
 const CROP_TARGET_W = 1100;
 
+// Étapes réelles du scan : l'indicateur avance quand l'étape est vraiment
+// terminée (et non plus sur une minuterie déconnectée du traitement).
 const LOAD_STEPS = [
   { icon: 'scan-outline', label: 'Analyse de la carte par IA…' },
-  { icon: 'library-outline', label: 'Identification du set et numéro…' },
-  { icon: 'globe-outline', label: 'Recherche des prix en ligne…' },
-  { icon: 'bar-chart-outline', label: 'Calcul du meilleur prix…' },
+  { icon: 'globe-outline', label: 'Recherche du set et des prix…' },
+  { icon: 'save-outline', label: 'Enregistrement dans la collection…' },
 ];
+
+// Ré-encode une image en JPEG, en bornant sa largeur. Les actions (recadrage)
+// sont appliquées avant le redimensionnement.
+async function renderJpeg(uri, { crop, width } = {}) {
+  const ctx = ImageManipulator.manipulate(uri);
+  if (crop) ctx.crop(crop);
+  if (width) ctx.resize({ width });
+  const image = await ctx.renderAsync();
+  return image.saveAsync({ base64: true, compress: 0.92, format: SaveFormat.JPEG });
+}
+
+// Les retours haptiques sont décoratifs : ils ne doivent jamais faire échouer
+// un scan (appareil sans moteur de vibration, web…).
+function haptic(fn) {
+  fn().catch(() => {});
+}
 
 function FloatingPokeball({ size = 120, style, bob = 12, spinDuration = 14000 }) {
   const bobAnim = useRef(new Animated.Value(0)).current;
@@ -81,46 +98,47 @@ export default function ScannerScreen() {
   const cameraRef = useRef(null);
   const frameRef = useRef(null);
   const previewRef = useRef(null);
-  const cancelledRef = useRef(false);
+  // Identifiant du scan en cours. Annuler (ou relancer) l'incrémente : un scan
+  // dont l'identifiant n'est plus le courant ignore ses résultats. Un simple
+  // booléen « annulé » était remis à false par le scan suivant, et l'ancien
+  // scan pouvait alors écraser le nouveau résultat.
+  const scanIdRef = useRef(0);
+  const busyRef = useRef(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState('back');
-  const [phase, setPhase] = useState('idle'); // idle | scanning | result | error
+  const [torch, setTorch] = useState(false);
+  const [phase, setPhase] = useState('idle'); // idle | camera | scanning | result | error
   const [loadStep, setLoadStep] = useState(0);
   const [capturedUri, setCapturedUri] = useState(null);
   const [cardInfo, setCardInfo] = useState(null);
   const [prices, setPrices] = useState(null);
+  const [errorTitle, setErrorTitle] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const runLoadingSteps = useCallback(() => {
-    let step = 0;
-    const interval = setInterval(() => {
-      step++;
-      setLoadStep(step);
-      if (step >= LOAD_STEPS.length - 1) clearInterval(interval);
-    }, 1200);
-    return () => clearInterval(interval);
+  const showError = useCallback((title, msg) => {
+    setErrorTitle(title);
+    setErrorMsg(msg);
+    setPhase('error');
   }, []);
 
   const analyze = useCallback(async (uri, base64) => {
-    cancelledRef.current = false;
+    const scanId = ++scanIdRef.current;
+    const stale = () => scanId !== scanIdRef.current;
     setPhase('scanning');
     setLoadStep(0);
     setCapturedUri(uri);
-    const stopSteps = runLoadingSteps();
 
     try {
       const card = await identifyCard(base64);
-      console.log('[SCAN] identifyCard →', JSON.stringify(card, null, 2));
-      if (cancelledRef.current) { stopSteps(); return; }
+      if (stale()) return;
       if (!card.found) {
-        stopSteps();
-        setErrorMsg(card.reason || 'Aucune carte Pokémon détectée.');
-        setPhase('error');
+        showError('Carte non reconnue', card.reason || 'Aucune carte Pokémon détectée.');
         return;
       }
+      setLoadStep(1);
       const priceData = await fetchCardPrices(card, currency);
-      console.log('[SCAN] fetchCardPrices →', JSON.stringify(priceData, null, 2));
-      if (cancelledRef.current) { stopSteps(); return; }
+      if (stale()) return;
+      setLoadStep(2);
 
       // L'IA se trompe parfois sur le set. Si l'API a confirmé l'édition exacte
       // (matchedSet), on l'utilise comme source de vérité pour le nom du set.
@@ -134,19 +152,20 @@ export default function ScannerScreen() {
           }
         : card;
 
+      const saved = await saveToHistory(enrichedCard, priceData, uri);
+      if (stale()) return;
       setCardInfo(enrichedCard);
       setPrices(priceData);
-      await saveToHistory(enrichedCard, priceData, uri);
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      stopSteps();
+      // La photo a été copiée dans le stockage permanent : on affiche cette copie.
+      if (saved?.imageUri) setCapturedUri(saved.imageUri);
+      haptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success));
       setPhase('result');
     } catch (err) {
-      stopSteps();
-      if (cancelledRef.current) return;
-      setErrorMsg(err.message || 'Une erreur est survenue.');
-      setPhase('error');
+      if (stale()) return;
+      haptic(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error));
+      showError('Analyse impossible', err.message || 'Une erreur est survenue.');
     }
-  }, [runLoadingSteps, currency]);
+  }, [currency, showError]);
 
   // Mesure un élément dans la fenêtre (coordonnées écran), en promesse.
   const measureInWindow = useCallback((ref) => new Promise((resolve) => {
@@ -164,7 +183,7 @@ export default function ScannerScreen() {
   // CROP_TARGET_W pour garder une carte nette sans alourdir, et on ré-encode
   // UNE SEULE FOIS en JPEG haute qualité (pas de double compression).
   const cropToFrame = useCallback(async (photo) => {
-    let actions = [];
+    let actions = {};
 
     try {
       const [frame, preview] = await Promise.all([
@@ -191,50 +210,60 @@ export default function ScannerScreen() {
           height: Math.max(1, Math.min(cropH, ph)),
         };
 
-        actions.push({ crop });
-        if (crop.width > CROP_TARGET_W) {
-          actions.push({ resize: { width: CROP_TARGET_W } });
-        }
+        actions = { crop, width: crop.width > CROP_TARGET_W ? CROP_TARGET_W : undefined };
       } else if (photo.width > CROP_TARGET_W) {
         // Pas de cadre mesurable : on garde la photo entière mais on borne sa taille.
-        actions.push({ resize: { width: CROP_TARGET_W } });
+        actions = { width: CROP_TARGET_W };
       }
     } catch (e) {
       console.warn('Recadrage impossible, photo entière utilisée', e);
-      actions = [];
+      actions = { width: photo.width > CROP_TARGET_W ? CROP_TARGET_W : undefined };
     }
 
-    try {
-      return await manipulateAsync(
-        photo.uri,
-        actions,
-        { base64: true, compress: 0.92, format: SaveFormat.JPEG },
-      );
-    } catch (e) {
-      console.warn('Ré-encodage impossible, photo brute utilisée', e);
-      return photo; // dernier recours
-    }
+    return renderJpeg(photo.uri, actions);
   }, [measureInWindow]);
 
+  // Le bouton de capture est ignoré tant qu'une capture est en cours : un
+  // double appui lançait deux analyses (et deux appels payants à l'IA).
   const capturePhoto = useCallback(async () => {
-    if (!cameraRef.current) return;
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Capture en qualité maximale ; la compression finale est faite une seule
-    // fois dans cropToFrame. Pas besoin du base64 ici (on ré-encode ensuite).
-    const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
-    const cropped = await cropToFrame(photo);
-    await analyze(cropped.uri, cropped.base64);
-  }, [analyze, cropToFrame]);
-
-  const pickFromGallery = useCallback(async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      base64: true, quality: 0.8,
-    });
-    if (!res.canceled && res.assets[0]) {
-      await analyze(res.assets[0].uri, res.assets[0].base64);
+    if (!cameraRef.current || busyRef.current) return;
+    busyRef.current = true;
+    try {
+      haptic(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium));
+      // Capture en qualité maximale ; la compression finale est faite une seule
+      // fois dans cropToFrame. Pas besoin du base64 ici (on ré-encode ensuite).
+      const photo = await cameraRef.current.takePictureAsync({ quality: 1 });
+      const cropped = await cropToFrame(photo);
+      setTorch(false);
+      await analyze(cropped.uri, cropped.base64);
+    } catch (e) {
+      showError('Capture impossible', e.message || 'La photo n\'a pas pu être prise.');
+    } finally {
+      busyRef.current = false;
     }
-  }, [analyze]);
+  }, [analyze, cropToFrame, showError]);
+
+  // Une image de la galerie peut peser plusieurs Mo (et être en HEIC/PNG) :
+  // on la ré-encode en JPEG à la même largeur que les captures caméra, sinon
+  // elle dépassait la limite de taille de l'API d'analyse.
+  const pickFromGallery = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+      const asset = !res.canceled && res.assets?.[0];
+      if (!asset) return;
+      const image = await renderJpeg(asset.uri, {
+        width: asset.width > CROP_TARGET_W ? CROP_TARGET_W : undefined,
+      });
+      setTorch(false);
+      await analyze(image.uri, image.base64);
+    } catch (e) {
+      showError('Import impossible', e.message || 'L\'image n\'a pas pu être lue.');
+    } finally {
+      busyRef.current = false;
+    }
+  }, [analyze, showError]);
 
   const startCamera = useCallback(async () => {
     let granted = permission?.granted;
@@ -253,7 +282,8 @@ export default function ScannerScreen() {
   }, [permission, requestPermission]);
 
   const reset = () => {
-    cancelledRef.current = true;
+    scanIdRef.current++; // invalide le scan en cours éventuel
+    setTorch(false);
     setPhase('idle');
     setCardInfo(null);
     setPrices(null);
@@ -302,7 +332,7 @@ export default function ScannerScreen() {
       <View style={[styles.centered, { paddingTop: insets.top }]}>
         <View style={styles.errorCard}>
           <Ionicons name="alert-circle" size={40} color={colors.primary} />
-          <Text style={styles.errorTitle}>Carte non reconnue</Text>
+          <Text style={styles.errorTitle}>{errorTitle}</Text>
           <Text style={styles.errorMsg}>{errorMsg}</Text>
           <TouchableOpacity style={styles.btnPrimary} onPress={reset}>
             <Ionicons name="scan-outline" size={18} color="#fff" />
@@ -335,7 +365,16 @@ export default function ScannerScreen() {
     return (
       <View style={[styles.cameraScreen, { paddingBottom: insets.bottom }]}>
        <View ref={previewRef} collapsable={false} style={styles.camera}>
-        <CameraView ref={cameraRef} style={styles.camera} facing={facing} active={isFocused}>
+        {/* CameraView n'accepte pas d'enfants : l'aperçu remplit le fond et
+            l'interface est superposée en position absolue. */}
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing={facing}
+          active={isFocused}
+          enableTorch={torch && facing === 'back'}
+        />
+        <View style={StyleSheet.absoluteFill}>
           <View style={[styles.topBar, { paddingTop: insets.top + 12 }]}>
             <TouchableOpacity style={styles.cameraBackBtn} onPress={reset}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
@@ -366,9 +405,15 @@ export default function ScannerScreen() {
             <TouchableOpacity style={styles.captureBtn} onPress={capturePhoto}>
               <View style={styles.captureBtnInner} />
             </TouchableOpacity>
-            <View style={{ width: 52 }} />
+            {facing === 'back' ? (
+              <TouchableOpacity style={styles.galleryBtn} onPress={() => setTorch(t => !t)}>
+                <Ionicons name={torch ? 'flash' : 'flash-off-outline'} size={24} color="#fff" />
+              </TouchableOpacity>
+            ) : (
+              <View style={{ width: 52 }} />
+            )}
           </View>
-        </CameraView>
+        </View>
        </View>
       </View>
     );

@@ -6,10 +6,10 @@
 
 Pointez la caméra sur une carte → Claude Vision l'identifie → les prix réels (Cardmarket en EUR ou TCGplayer en USD) s'affichent → la carte est archivée dans votre historique et rangée automatiquement dans votre album, set par set.
 
-[![Expo SDK 54](https://img.shields.io/badge/Expo-SDK%2054-000020?logo=expo&logoColor=white)](https://expo.dev)
-[![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
+[![Expo SDK 58](https://img.shields.io/badge/Expo-SDK%2058-000020?logo=expo&logoColor=white)](https://expo.dev)
+[![React Native](https://img.shields.io/badge/React%20Native-0.88-61DAFB?logo=react&logoColor=white)](https://reactnative.dev)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](https://react.dev)
-[![Claude Vision](https://img.shields.io/badge/IA-Claude%20Sonnet%204.6-D97757)](https://anthropic.com)
+[![Claude Vision](https://img.shields.io/badge/IA-Claude%20Sonnet%205.5-D97757)](https://anthropic.com)
 [![Cloudflare Worker](https://img.shields.io/badge/Proxy-Cloudflare%20Worker-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com)
 
 </div>
@@ -25,7 +25,7 @@ Pointez la caméra sur une carte → Claude Vision l'identifie → les prix rée
 | 🤖 **Identification IA** | Claude Vision détecte le nom (FR + EN), le set, le numéro, la rareté, le type, les HP, l'année et la condition. |
 | 💰 **Cotes réelles** | Prix issus de l'API Pokémon TCG — Cardmarket (EUR) ou TCGplayer (USD) selon la devise réglée — avec lien vers la fiche marchande. |
 | 🗂️ **Collection par set** | Chaque carte reconnue est rangée dans l'album de son set officiel, sur une grille numérotée `1..total` où les emplacements vides restent visibles. |
-| 📊 **Historique** | Vos 50 derniers scans avec leur valeur estimée, consultables et effaçables. |
+| 📊 **Historique** | Vos 50 derniers scans avec leur valeur estimée, filtrables par devise, consultables et effaçables, avec une recherche par nom, set ou numéro. |
 | 🌓 **Thème clair / sombre** | Suivi automatique du système ou bascule manuelle. |
 | 🇫🇷 **Interface française** | Conditions et types traduits à l'affichage ; la donnée brute reste en anglais pour la recherche de prix. |
 | 🔒 **Zéro secret embarqué** | Aucune clé API dans l'app : tout transite par un proxy Cloudflare Worker. |
@@ -52,7 +52,7 @@ Pointez la caméra sur une carte → Claude Vision l'identifie → les prix rée
 
 1. **Capture** — la caméra (ou la galerie) produit une image, compressée puis encodée en base64.
 2. **Identification** — `POST /identify` relaie l'image à Claude Vision, qui renvoie un JSON structuré (nom, set, numéro, rareté…).
-3. **Cotation** — `GET /prices` interroge l'API Pokémon TCG. Un moteur de correspondance (`services/prices.js`) classe les résultats par signaux **indépendants de la langue** (total imprimé, code de set, année) pour retenir l'**édition exacte**.
+3. **Cotation** — le code d'extension imprimé sur la carte (« PAL ») est traduit en set via `GET /sets`, puis `GET /prices` interroge l'API Pokémon TCG. Un moteur de correspondance (`services/prices.js`) classe les résultats par signaux **indépendants de la langue** (total imprimé, code de set, année) pour retenir l'**édition exacte**.
 4. **Archivage** — le scan rejoint l'historique. Si — et seulement si — l'édition a été **confirmée**, la carte est rangée dans la collection avec l'identité officielle de son set.
 
 > **Correspondance prudente.** L'IA renvoie souvent le nom en français tandis que l'API est en anglais. Une édition n'est « confirmée » que si un signal fort (total imprimé **ou** code de set) est présent **et** qu'aucune autre édition n'est à égalité. À défaut, le lien direct est masqué (au profit d'une recherche pré-remplie) et la carte n'entre pas dans la collection — pour ne jamais afficher la mauvaise carte.
@@ -87,7 +87,7 @@ pokemon-scanner/
 │       └── translations.js      # Traductions FR (conditions, types, dates)
 │
 └── proxy/                       # Cloudflare Worker — détient les clés secrètes
-    ├── src/index.js             # Routes /identify et /prices
+    ├── src/index.js             # Routes /identify, /prices et /sets
     ├── wrangler.toml            # Config du Worker
     └── README.md                # Étapes de mise en place du proxy
 ```
@@ -176,8 +176,9 @@ Définis via `npx wrangler secret put <NOM>` depuis `proxy/` :
 
 | Méthode | Route | Corps / Paramètres | Cible |
 |---------|-------|--------------------|-------|
-| `POST` | `/identify` | `{ "image": "<base64>" }` | Claude Vision (`claude-sonnet-4-6`) |
+| `POST` | `/identify` | `{ "image": "<base64>" }` | Claude Vision (`claude-sonnet-5-5`) |
 | `GET` | `/prices` | `?q=<requête lucene>&pageSize=20` | API Pokémon TCG |
+| `GET` | `/sets` | `?q=<requête lucene>` | API Pokémon TCG (extensions : code imprimé → set) |
 
 ---
 
@@ -209,11 +210,11 @@ Définis via `npx wrangler secret put <NOM>` depuis `proxy/` :
 
 ## 🧩 Stack technique
 
-- **[Expo](https://expo.dev)** (SDK 54) + **[React Native](https://reactnative.dev)** 0.81 / **[React](https://react.dev)** 19
+- **[Expo](https://expo.dev)** (SDK 58) + **[React Native](https://reactnative.dev)** 0.88 / **[React](https://react.dev)** 19
 - **[React Navigation](https://reactnavigation.org)** — navigation à onglets
-- **[expo-camera](https://docs.expo.dev/versions/latest/sdk/camera/)**, `expo-image-picker`, `expo-image-manipulator`, `expo-media-library`, `expo-haptics`
+- **[expo-camera](https://docs.expo.dev/versions/latest/sdk/camera/)**, `expo-image-picker`, `expo-image-manipulator`, `expo-file-system`, `expo-haptics`
 - **[AsyncStorage](https://react-native-async-storage.github.io/async-storage/)** — historique (50 max) et collection, en local
-- **[Claude API](https://anthropic.com)** — Vision (`claude-sonnet-4-6`)
+- **[Claude API](https://anthropic.com)** — Vision (`claude-sonnet-5-5`)
 - **[API Pokémon TCG](https://pokemontcg.io)** — cotes Cardmarket (EUR) / TCGplayer (USD)
 - **[Cloudflare Workers](https://workers.cloudflare.com)** (Wrangler) — proxy sécurisé
 

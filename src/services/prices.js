@@ -4,10 +4,19 @@
 // Le réglage de devise du user choisit le marché : EUR -> cote Cardmarket
 // (européenne), USD -> cote TCGplayer (américaine). Aucune clé API n'est
 // présente dans le bundle : elle est ajoutée côté serveur par le proxy.
+import { fetchWithTimeout } from './anthropic';
+
 const PROXY_URL = process.env.EXPO_PUBLIC_PROXY_URL;
 
-// Taux de repli, utilisé pour le fallback par rareté.
-const USD_PER_EUR = 1.08;
+// Taux de conversion approximatif, utilisé pour le fallback par rareté et pour
+// additionner des cotes en devises différentes (totaux historique/collection).
+export const USD_PER_EUR = 1.08;
+
+// Ramène une valeur en euros (approximation, cf. USD_PER_EUR).
+export function toEur(value, currency) {
+  if (typeof value !== 'number') return 0;
+  return currency === 'USD' ? value / USD_PER_EUR : value;
+}
 
 // "025/165" -> "25" ; "TG05/TG30" -> "TG05" ; "H1" -> "H1".
 // On enlève les zéros de tête sur les numéros purement numériques car
@@ -42,14 +51,17 @@ function normalize(str) {
 // code du set, année) car l'IA renvoie le set en français et l'API en anglais.
 const STRONG_SET_SCORE = 5; // au moins un signal fort (total OU code de set)
 
-function scoreSet(card, parsed, r) {
+function scoreSet(card, parsed, r, codeSetIds) {
   let score = 0;
   const set = r.set || {};
 
   const rTotal = set.printedTotal ?? set.total ?? null;
   if (parsed.total && rTotal && parsed.total === rTotal) score += 5;
 
-  if (card.setCode && set.id && normalize(card.setCode) === normalize(set.id)) score += 6;
+  // Le code imprimé sur la carte (« PAL ») a été traduit en identifiant(s) de
+  // set via /sets (codeSetIds) ; on accepte aussi le code égal à l'id (« sv2 »).
+  const code = normalize(card.setCode);
+  if (set.id && (codeSetIds.includes(set.id) || (code && normalize(set.id) === code))) score += 6;
 
   const rYear = String(set.releaseDate || '').slice(0, 4);
   if (card.year && rYear && String(card.year).slice(0, 4) === rYear) score += 2;
@@ -70,10 +82,25 @@ function escapeQuery(str) {
 async function queryCards(q) {
   if (!PROXY_URL) throw new Error('URL du proxy manquante (EXPO_PUBLIC_PROXY_URL).');
   const url = `${PROXY_URL}/prices?q=${encodeURIComponent(q)}&pageSize=20`;
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) throw new Error(`API Pokémon TCG : HTTP ${res.status}`);
   const json = await res.json();
   return json.data || [];
+}
+
+// Traduit le code d'extension imprimé sur la carte (« PAL ») en sets de l'API.
+// Le champ `ptcgoCode` n'est interrogeable que sur /sets (sur /cards, l'API
+// répond une erreur 500 et ne renvoie même pas ce champ dans les résultats).
+async function findSetsByCode(code) {
+  if (!PROXY_URL || !/^[A-Za-z0-9-]{2,8}$/.test(code)) return [];
+  try {
+    const res = await fetchWithTimeout(`${PROXY_URL}/sets?q=${encodeURIComponent(`ptcgoCode:"${escapeQuery(code)}"`)}&pageSize=10`);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch {
+    return [];
+  }
 }
 
 // Cherche la carte la plus proche de ce que l'IA a identifié.
@@ -97,12 +124,30 @@ async function findCard(card) {
   const parsed = parseNumber(card.number);
   const num = parsed.num;
   const attempts = [];
-  // D'abord les requêtes les plus précises (nom + numéro) pour TOUS les noms,
-  // puis on relâche en cherchant par nom seul.
-  if (num) for (const name of names) attempts.push(`name:"${escapeQuery(name)}" number:"${escapeQuery(num)}"`);
-  for (const name of names) attempts.push(`name:"${escapeQuery(name)}"`);
+  // 1) Les indices imprimés sur la carte : code d'extension (« PAL ») + numéro.
+  //    Ils désignent directement la carte, quelle que soit la langue du nom. On
+  //    vérifie quand même le nom (requireName) pour écarter une erreur de
+  //    lecture du numéro qui pointerait vers une autre carte du même set.
+  const codeSets = await findSetsByCode(String(card.setCode || '').trim());
+  const codeSetIds = codeSets.map(s => s.id);
+  if (num) {
+    for (const id of codeSetIds) {
+      attempts.push({ q: `set.id:"${escapeQuery(id)}" number:"${escapeQuery(num)}"`, requireName: true });
+    }
+  }
+  // 2) Nom + numéro pour TOUS les noms, puis 3) nom seul.
+  if (num) for (const name of names) attempts.push({ q: `name:"${escapeQuery(name)}" number:"${escapeQuery(num)}"` });
+  for (const name of names) attempts.push({ q: `name:"${escapeQuery(name)}"` });
 
-  for (const q of attempts) {
+  const nameMatches = r => {
+    const rn = normalize(r.name);
+    return names.some(n => {
+      const a = normalize(n);
+      return a && rn && (rn.includes(a) || a.includes(rn));
+    });
+  };
+
+  for (const { q, requireName } of attempts) {
     let results;
     try {
       results = await queryCards(q);
@@ -115,11 +160,12 @@ async function findCard(card) {
     // correspondance du set ; à score égal, on départage par présence de cotes.
     const sameNumber = r => num && cardNumberToken(r.number) === num;
     const hasPrices = r => (r.tcgplayer?.prices || r.cardmarket?.prices) ? 1 : 0;
-    const pool = num ? results.filter(sameNumber) : results;
+    const pool = (num ? results.filter(sameNumber) : results)
+      .filter(r => !requireName || nameMatches(r));
     if (!pool.length) continue;
 
     const scored = pool
-      .map(r => ({ r, score: scoreSet(card, parsed, r) }))
+      .map(r => ({ r, score: scoreSet(card, parsed, r, codeSetIds) }))
       .sort((a, b) => (b.score - a.score) || (hasPrices(b.r) - hasPrices(a.r)));
 
     const best = scored[0];
@@ -136,9 +182,12 @@ async function findCard(card) {
     const bestTotal = best.r.set?.printedTotal ?? best.r.set?.total ?? null;
     const totalOk = !parsed.total || (bestTotal != null && bestTotal === parsed.total);
 
-    return { match: best.r, confident: strong && !ambiguous && totalOk };
+    // Infos du set trouvées via le code (code, symbole, série) : les résultats
+    // de /cards ne contiennent pas toujours le code d'extension.
+    const codeSet = codeSets.find(s => s.id === bestSetId) || null;
+    return { match: best.r, confident: strong && !ambiguous && totalOk, codeSet };
   }
-  return { match: null, confident: false };
+  return { match: null, confident: false, codeSet: null };
 }
 
 function trendFrom(recent, base) {
@@ -174,7 +223,9 @@ function fromCardmarket(cm) {
 
 // Choisit la finition TCGplayer la plus pertinente selon la rareté.
 function pickTcgVariant(prices, rarity) {
-  const holoish = /holo|rare|ultra|secret|illustration|gx|ex|v|vmax/i.test(rarity || '');
+  // « Rare » seule désigne une rare NON holo : on ne privilégie la finition holo
+  // que pour les raretés qui le sont réellement.
+  const holoish = /holo|ultra|secret|illustration|\b(gx|ex|v|vmax|vstar)\b/i.test(rarity || '');
   const order = holoish
     ? ['holofoil', 'reverseHolofoil', '1stEditionHolofoil', 'unlimitedHolofoil', 'normal', '1stEdition']
     : ['normal', 'holofoil', 'reverseHolofoil', '1stEditionHolofoil', 'unlimitedHolofoil', '1stEdition'];
@@ -212,28 +263,54 @@ function fromTcgplayer(tp, rarity) {
 async function fetchFromPokemonTcg(card, currency) {
   const isUsd = currency === 'USD';
   try {
-    const { match, confident } = await findCard(card);
+    const { match, confident, codeSet } = await findCard(card);
     const source = isUsd
       ? fromTcgplayer(match?.tcgplayer, card.rarity)
       : fromCardmarket(match?.cardmarket);
     // Set non confirmé : l'URL directe risque de mener à une autre édition de la
     // carte (image différente). On l'efface pour que CardResultView retombe sur
-    // une recherche pré-remplie nom + numéro, qui reste cohérente.
+    // une recherche pré-remplie sur le site marchand, qui reste cohérente.
     if (source && !confident) source.url = null;
 
     // Set CONFIRMÉ par l'API (signal fort uniquement) : sert à fournir une année
-    // de sortie fiable à l'historique. Sinon on risquerait une mauvaise édition.
+    // de sortie fiable à l'historique et à ranger la carte dans sa collection
+    // (série > extension). Sinon on risquerait une mauvaise édition.
     const set = confident && match?.set ? {
       id: match.set.id,
       name: match.set.name,
+      series: match.set.series || codeSet?.series || null,
+      code: match.set.ptcgoCode || codeSet?.ptcgoCode || null,
+      symbol: match.set.images?.symbol || codeSet?.images?.symbol || null,
       printedTotal: match.set.printedTotal ?? match.set.total ?? null,
       year: String(match.set.releaseDate || '').slice(0, 4),
     } : null;
 
-    return { id: isUsd ? 'tcgplayer' : 'cardmarket', source: source || null, set };
+    // Fiches marchandes de la carte exacte : disponibles même quand le marché
+    // choisi n'a pas de cote (on peut alors quand même ouvrir la fiche).
+    const links = confident && match ? {
+      cardmarket: match.cardmarket?.url || null,
+      tcgplayer: match.tcgplayer?.url || null,
+    } : null;
+
+    return { id: isUsd ? 'tcgplayer' : 'cardmarket', source: source || null, set, links };
   } catch {
     return null;
   }
+}
+
+// --- Liens marchands --------------------------------------------------------
+
+// Recherche pré-remplie sur le site marchand, quand on n'a pas l'URL de la
+// fiche exacte (édition non confirmée, ancien scan, estimation). Les deux sites
+// indexent les cartes sous leur nom anglais : on privilégie donc `nameEn`.
+export function marketSearchUrl(market, card) {
+  const name = String(card?.nameEn || card?.name || '').trim();
+  if (!name) return null;
+  const q = encodeURIComponent(name);
+  if (market === 'tcgplayer') {
+    return `https://www.tcgplayer.com/search/pokemon/product?productLineName=pokemon&q=${q}`;
+  }
+  return `https://www.cardmarket.com/fr/Pokemon/Products/Search?searchString=${q}`;
 }
 
 // --- Agrégation -----------------------------------------------------------
@@ -255,6 +332,7 @@ export async function fetchCardPrices(card, currency = 'EUR') {
   }
 
   if (result && result.set) prices.matchedSet = result.set;
+  if (result && result.links) prices.links = result.links;
   return prices;
 }
 

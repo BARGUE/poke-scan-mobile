@@ -6,16 +6,12 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "backgroundColor": "#E24B4A"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.yourname.pokemonscanner",
       "infoPlist": {
         "NSCameraUsageDescription": "Nous utilisons la caméra pour scanner vos cartes Pokémon.",
-        "NSPhotoLibraryUsageDescription": "Nous accédons à vos photos pour analyser vos cartes Pokémon.",
-        "NSPhotoLibraryAddUsageDescription": "Nous sauvegardons les photos de vos cartes."
+        "NSPhotoLibraryUsageDescription": "Nous accédons à vos photos pour analyser vos cartes Pokémon."
       }
     },
     "android": {
@@ -24,22 +20,20 @@
         "backgroundColor": "#E24B4A"
       },
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.CAMERA"
       ],
-      "package": "com.yourname.pokemonscanner"
+      "package": "com.yourname.pokemonscanner",
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
       [
         "expo-camera",
         {
-          "cameraPermission": "Autoriser Pokémon Scanner à utiliser la caméra pour scanner vos cartes."
+          "cameraPermission": "Autoriser Pokémon Scanner à utiliser la caméra pour scanner vos cartes.",
+          "recordAudioAndroidPermission": false,
+          "microphonePermission": false
         }
       ],
       [
@@ -48,7 +42,16 @@
           "photosPermission": "Autoriser Pokémon Scanner à accéder à vos photos."
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#E24B4A",
+          "image": "./assets/icon.png",
+          "imageWidth": 200
+        }
+      ]
     ],
     "extra": {
       "eas": {

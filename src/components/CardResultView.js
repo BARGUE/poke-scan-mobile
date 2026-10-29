@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FONTS, RADIUS, SHADOWS, RARITY_COLORS } from '../theme';
 import { useTheme } from '../ThemeContext';
 import { translateCondition, translateType, formatDateFr } from '../utils/translations';
+import { marketSearchUrl } from '../services/prices';
 
 async function openSource(url) {
   if (!url) return;
@@ -40,7 +41,7 @@ export default function CardResultView({
     );
   };
 
-  const PriceRow = ({ label, color, sub, data, isBest, url }) => {
+  const PriceRow = ({ label, color, sub, data, isBest, url, isSearch }) => {
     if (!data) return null;
     return (
       <TouchableOpacity
@@ -54,6 +55,11 @@ export default function CardResultView({
           <View>
             <Text style={[styles.priceLabel, isBest && { color: colors.success }]}>{label}</Text>
             <Text style={styles.priceSub}>{sub}</Text>
+            {url && (
+              <Text style={[styles.priceLink, { color }]}>
+                {isSearch ? `Rechercher sur ${label}` : `Voir la fiche sur ${label}`}
+              </Text>
+            )}
           </View>
         </View>
         <View style={styles.priceValues}>
@@ -67,7 +73,7 @@ export default function CardResultView({
             <Text style={styles.priceRange}>
               {formatPrice(data.low, data.currency)} – {formatPrice(data.high, data.currency)}
             </Text>
-            {url && <Ionicons name="open-outline" size={13} color={colors.textTertiary} />}
+            {url && <Ionicons name={isSearch ? 'search-outline' : 'open-outline'} size={13} color={colors.textTertiary} />}
           </View>
         </View>
       </TouchableOpacity>
@@ -83,6 +89,7 @@ export default function CardResultView({
     ebay: { label: 'eBay', color: colors.ebay },
   };
   const marketSub = { tcgplayer: 'Marché US', cardmarket: 'Marché EU' };
+  const isHttp = u => typeof u === 'string' && /^https?:\/\//.test(u);
   const sources = SOURCE_ORDER
     .filter(id => prices?.[id])
     .map(id => {
@@ -90,15 +97,14 @@ export default function CardResultView({
       const meta = sourceMeta[id];
       let sub = marketSub[data.market] || (data.currency === 'USD' ? 'eBay.com' : 'eBay.fr');
       if (data.approx) sub += ' · ≈ converti $→€';
-      // Lien : uniquement l'URL directe renvoyée par l'API (carte/édition
-      // confirmée). Sinon `url` reste null et on NE redirige PAS — le prix est
-      // une estimation, ouvrir une recherche pré-remplie n'apporterait rien.
-      const url = (typeof data.url === 'string' && /^https?:\/\//.test(data.url)) ? data.url : null;
-      return { id, label: meta.label, color: meta.color, sub, data, url };
+      // Lien : la fiche exacte de la carte quand l'édition est confirmée (URL
+      // renvoyée par l'API) ; sinon une recherche pré-remplie sur le site, pour
+      // toujours pouvoir retrouver la carte chez le marchand.
+      const direct = [data.url, prices?.links?.[id]].find(isHttp) || null;
+      const url = direct || marketSearchUrl(id, card);
+      return { id, label: meta.label, color: meta.color, sub, data, url, isSearch: !direct };
     });
   const bestSrc = sources.find(s => s.id === prices?.bestDeal) || sources[0];
-  // Bannière "Meilleur prix" : on n'ouvre QUE s'il existe une URL directe vers la
-  // fiche (sinon `null` → bouton désactivé, pas de redirection vers une recherche).
   const bestDealUrl = bestSrc?.url || null;
 
   return (
@@ -155,7 +161,7 @@ export default function CardResultView({
               Meilleur prix sur <Text style={{ fontWeight: '500' }}>{bestSrc.label}</Text>{' '}
               : <Text style={{ fontWeight: '500' }}>{formatPrice(bestSrc.data?.mid, bestSrc.data?.currency)}</Text>
             </Text>
-            {bestDealUrl && <Ionicons name="open-outline" size={16} color={colors.success} />}
+            {bestDealUrl && <Ionicons name={bestSrc.isSearch ? 'search-outline' : 'open-outline'} size={16} color={colors.success} />}
           </TouchableOpacity>
         )}
         {!prices?.estimated && prices?.lastUpdated ? (
@@ -166,8 +172,11 @@ export default function CardResultView({
       <View style={styles.sectionCard}>
         <Text style={styles.sectionTitle}>Détails de la carte</Text>
         {[
-          ['Set', card.set],
-          ['Numéro', card.number],
+          ['Série', prices?.matchedSet?.series || '—'],
+          ['Set', card.set || '—'],
+          ['Code du set', prices?.matchedSet?.code || card.setCode || '—'],
+          ['Numéro', card.number || '—'],
+          ['Collection', prices?.matchedSet ? 'Rangée dans la collection' : 'Set non confirmé'],
           ['Type', translateType(card.type) || '—'],
           ['HP', card.hp || '—'],
           ['Année', card.year || '—'],
@@ -213,6 +222,7 @@ const makeStyles = (COLORS) => StyleSheet.create({
   sourceDot: { width: 10, height: 10, borderRadius: 5 },
   priceLabel: { fontSize: FONTS.size.md, color: COLORS.textPrimary },
   priceSub: { fontSize: FONTS.size.xs, color: COLORS.textSecondary },
+  priceLink: { fontSize: FONTS.size.xs, fontWeight: '500', marginTop: 2 },
   priceValues: { alignItems: 'flex-end' },
   priceMid: { fontSize: FONTS.size.md, fontWeight: '500', color: COLORS.textPrimary },
   priceRange: { fontSize: FONTS.size.xs, color: COLORS.textSecondary },

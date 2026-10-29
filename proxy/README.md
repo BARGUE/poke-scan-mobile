@@ -82,3 +82,4 @@ npm run dev
 |---------|-------------------------|-------------------------------------|------------------------|
 | `POST`  | `/identify`             | `{ "image": "<base64>" }`           | Claude Vision          |
 | `GET`   | `/prices`               | `?q=<requête lucene>&pageSize=20`   | Pokémon TCG API        |
+| `GET`   | `/sets`                 | `?q=<requête lucene>`               | Pokémon TCG API (sets) |

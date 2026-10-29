@@ -47,6 +47,11 @@ export function translateCondition(value) {
 // Renvoie la valeur d'origine si elle n'est pas interprétable comme une date.
 export function formatDateFr(value) {
   if (value == null || value === '') return value;
+  // pokemontcg.io renvoie « 2024/06/01 », format que Hermes ne sait pas parser
+  // (et une date seule passée à Date serait lue en UTC, donc parfois décalée
+  // d'un jour) : on la reformate directement.
+  const ymd = String(value).match(/^(\d{4})[-/](\d{2})[-/](\d{2})$/);
+  if (ymd) return `${ymd[3]}/${ymd[2]}/${ymd[1]}`;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   const jour = String(d.getDate()).padStart(2, '0');
